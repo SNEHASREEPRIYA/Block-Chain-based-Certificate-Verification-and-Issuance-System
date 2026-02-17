@@ -1,5 +1,5 @@
 
-**## Blockchain Based Certification Verification and Issuance System ##**
+## Blockchain Based Certification Verification and Issuance System ##
 
 # Steps to run : 
 
