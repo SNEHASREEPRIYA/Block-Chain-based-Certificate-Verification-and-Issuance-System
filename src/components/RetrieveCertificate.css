@@ -1,0 +1,83 @@
+.retrieve-container {
+    max-width: 600px;
+    margin: 2rem auto;
+    padding: 1.5rem;
+    background: #fefefe;
+    border-radius: 16px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+    font-family: 'Segoe UI', sans-serif;
+  }
+  
+  .title {
+    text-align: center;
+    margin-bottom: 1.5rem;
+    color: #2c3e50;
+  }
+  
+  .form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 0.8rem;
+    margin-bottom: 1.5rem;
+  }
+  
+  .input {
+    padding: 10px;
+    font-size: 1rem;
+    border: 1px solid #ccc;
+    border-radius: 8px;
+  }
+  
+  .retrieve-btn {
+    background-color: #3498db;
+    color: white;
+    padding: 12px;
+    border: none;
+    border-radius: 8px;
+    font-size: 1rem;
+    cursor: pointer;
+    transition: background 0.3s ease;
+  }
+  
+  .retrieve-btn:hover {
+    background-color: #2980b9;
+  }
+  
+  .result-box {
+    padding: 1.2rem;
+    border-radius: 10px;
+    font-size: 0.95rem;
+    word-wrap: break-word;
+  }
+  
+  .success {
+    background-color: #ecf9f1;
+    border: 1px solid #2ecc71;
+    color: #2c662d;
+  }
+  
+  .error {
+    background-color: #fdecea;
+    border: 1px solid #e74c3c;
+    color: #c0392b;
+  }
+  
+  .details p {
+    margin: 0.3rem 0;
+  }
+  
+  .copy-btn {
+    margin-top: 1rem;
+    padding: 8px 12px;
+    font-size: 0.85rem;
+    border: none;
+    background: #2ecc71;
+    color: white;
+    border-radius: 6px;
+    cursor: pointer;
+  }
+  
+  .copy-btn:hover {
+    background: #27ae60;
+  }
+  
