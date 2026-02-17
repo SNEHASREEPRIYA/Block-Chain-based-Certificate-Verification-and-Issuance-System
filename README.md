@@ -1,7 +1,7 @@
 
-## Blockchain Based Certification Verification and Issuance System ##
+# Blockchain Based Certification Verification and Issuance System #
 
-# Steps to run : 
+## Steps to run : 
 
 **Terminal 1** – Start Hardhat Node
 npx hardhat node
@@ -13,7 +13,7 @@ npx hardhat run scripts/deploy.js --network localhost
 npm run dev
 
  
- # How to Access the Application
+ ## How to Access the Application
  
 **Open your browser and go to:**
 http://localhost:3000
