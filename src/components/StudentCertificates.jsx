@@ -2,127 +2,171 @@ import React, { useState } from 'react';
 import { getContract } from '../utils/certificateContract';
 
 function StudentCertificates() {
-    const [studentAddress, setStudentAddress] = useState('');
-    const [certificates, setCertificates] = useState([]);
-    const [loading, setLoading] = useState(false);
-    const [error, setError] = useState('');
-    const [searched, setSearched] = useState(false);
+  const [studentAddress, setStudentAddress] = useState('');
+  const [certificates, setCertificates] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [searched, setSearched] = useState(false);
 
-    const handleSearch = async () => {
-        if (!studentAddress.trim()) {
-            setError('Please enter a student address');
-            return;
+  const handleSearch = async () => {
+    if (!studentAddress.trim()) {
+      setError('Please enter a student address');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    setCertificates([]);
+    setSearched(true);
+
+    try {
+      const studentCerts = [];
+      const normalizedSearchAddress = studentAddress.toLowerCase().trim();
+
+      // First check sessionStorage for recently issued certificates
+      const allIssuedCerts = JSON.parse(sessionStorage.getItem('allIssuedCertificates')) || [];
+      console.log('Checking sessionStorage for certificates...');
+
+      for (const cert of allIssuedCerts) {
+        if (cert.studentAddress.toLowerCase() === normalizedSearchAddress) {
+          const certData = JSON.parse(sessionStorage.getItem(cert.certificateId));
+          if (certData) {
+            console.log('Found certificate in sessionStorage:', cert.certificateId);
+            studentCerts.push({
+              certificateId: cert.certificateId,
+              isValid: true,
+              courseProgram: certData.courseProgram,
+              grade: certData.grade,
+              issuer: certData.issuer,
+              institutionName: 'Institution',
+              issueDate: certData.issueDate,
+              expiryDate: certData.expiryDate,
+              isRevoked: false,
+              transactionHash: certData.transactionHash,
+              certificateHash: certData.certificateHash,
+              source: 'local'
+            });
+          }
         }
+      }
 
-        setLoading(true);
-        setError('');
-        setCertificates([]);
-        setSearched(true);
+      // Also query blockchain for certificates not in sessionStorage
+      console.log('Querying blockchain for certificates...');
+      try {
+        const contract = await getContract();
 
-        try {
-            const contract = await getContract();
+        // Get all CertificateIssued events - use the indexed student parameter
+        const issueFilter = contract.filters.CertificateIssued(null, studentAddress);
+        const issueEvents = await contract.queryFilter(issueFilter);
 
-            // Get all CertificateIssued events - use the indexed student parameter
-            const issueFilter = contract.filters.CertificateIssued(null, studentAddress);
-            const issueEvents = await contract.queryFilter(issueFilter);
+        console.log('Found blockchain events:', issueEvents.length);
 
-            console.log('Found events:', issueEvents.length);
+        // Fetch certificate details for each event
+        for (const event of issueEvents) {
+          try {
+            const certificateId = event.args[0]; // certificateId is the first argument
 
-            // Fetch certificate details for each event
-            const studentCerts = [];
-            for (const event of issueEvents) {
-                try {
-                    const certificateId = event.args[0]; // certificateId is the first argument
-                    console.log('Processing certificate:', certificateId);
-
-                    const certData = await contract.verifyCertificate(certificateId);
-
-                    if (certData && certData.certificate) {
-                        studentCerts.push({
-                            certificateId: certificateId,
-                            isValid: certData.isValid,
-                            courseProgram: certData.certificate.courseName,
-                            grade: certData.certificate.grade,
-                            issuer: certData.certificate.issuer,
-                            institutionName: certData.certificate.institutionName,
-                            issueDate: certData.certificate.issueDate,
-                            expiryDate: certData.certificate.expiryDate,
-                            isRevoked: certData.certificate.isRevoked
-                        });
-                    }
-                } catch (err) {
-                    console.error('Error fetching certificate:', err);
-                }
+            // Skip if already in local storage
+            if (studentCerts.some(c => c.certificateId === certificateId)) {
+              continue;
             }
 
-            if (studentCerts.length === 0) {
-                setError('No certificates found for this student address');
-            } else {
-                setCertificates(studentCerts);
+            console.log('Processing blockchain certificate:', certificateId);
+
+            const certData = await contract.verifyCertificate(certificateId);
+
+            if (certData && certData.certificate) {
+              studentCerts.push({
+                certificateId: certificateId,
+                isValid: certData.isValid,
+                courseProgram: certData.certificate.courseName,
+                grade: certData.certificate.grade,
+                issuer: certData.certificate.issuer,
+                institutionName: certData.certificate.institutionName,
+                issueDate: certData.certificate.issueDate,
+                expiryDate: certData.certificate.expiryDate,
+                isRevoked: certData.certificate.isRevoked,
+                certificateHash: certData.certificate.certificateHash,
+                source: 'blockchain'
+              });
             }
-        } catch (err) {
-            console.error('Error:', err);
-            setError('Failed to fetch certificates. Make sure the address is valid.');
-        } finally {
-            setLoading(false);
+          } catch (err) {
+            console.error('Error fetching certificate from blockchain:', err);
+          }
         }
-    };
+      } catch (err) {
+        console.error('Error querying blockchain events:', err);
+        // Continue without blockchain results if event query fails
+      }
 
-    return (
-        <div className="student-certificates-container">
-            <h2 className="title">🎓 Student Certificates</h2>
+      if (studentCerts.length === 0) {
+        setError('No certificates found for this student address');
+      } else {
+        setCertificates(studentCerts);
+      }
+    } catch (err) {
+      console.error('Error:', err);
+      setError('Failed to fetch certificates. Make sure the address is valid.');
+    } finally {
+      setLoading(false);
+    }
+  };
 
-            <div className="search-section">
-                <div className="search-box">
-                    <input
-                        type="text"
-                        placeholder="Enter Student Blockchain Address (0x...)"
-                        value={studentAddress}
-                        onChange={(e) => setStudentAddress(e.target.value)}
-                        onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
-                    />
-                    <button onClick={handleSearch} disabled={loading} className="search-btn">
-                        {loading ? '🔄 Searching...' : '🔍 Search Certificates'}
-                    </button>
+  return (
+    <div className="student-certificates-container">
+      <h2 className="title">🎓 Student Certificates</h2>
+
+      <div className="search-section">
+        <div className="search-box">
+          <input
+            type="text"
+            placeholder="Enter Student Blockchain Address (0x...)"
+            value={studentAddress}
+            onChange={(e) => setStudentAddress(e.target.value)}
+            onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+          />
+          <button onClick={handleSearch} disabled={loading} className="search-btn">
+            {loading ? '🔄 Searching...' : '🔍 Search Certificates'}
+          </button>
+        </div>
+      </div>
+
+      {error && <div className="alert error">❌ {error}</div>}
+
+      {loading && <div className="alert info">⏳ Loading certificates...</div>}
+
+      {searched && !loading && certificates.length === 0 && !error && (
+        <div className="alert warning">⚠️ No certificates found for this address</div>
+      )}
+
+      {certificates.length > 0 && (
+        <div className="certificates-section">
+          <h3>📋 Found {certificates.length} Certificate(s)</h3>
+          <div className="certificates-grid">
+            {certificates.map((cert, idx) => (
+              <div key={idx} className={`certificate-card ${cert.isRevoked ? 'revoked' : cert.isValid ? 'valid' : 'invalid'}`}>
+                <div className="card-header">
+                  <h4>📜 {cert.certificateId}</h4>
+                  <span className={`status ${cert.isRevoked ? 'revoked' : cert.isValid ? 'valid' : 'invalid'}`}>
+                    {cert.isRevoked ? '🚫 REVOKED' : cert.isValid ? '✅ VALID' : '❌ INVALID'}
+                  </span>
                 </div>
-            </div>
 
-            {error && <div className="alert error">❌ {error}</div>}
-
-            {loading && <div className="alert info">⏳ Loading certificates...</div>}
-
-            {searched && !loading && certificates.length === 0 && !error && (
-                <div className="alert warning">⚠️ No certificates found for this address</div>
-            )}
-
-            {certificates.length > 0 && (
-                <div className="certificates-section">
-                    <h3>📋 Found {certificates.length} Certificate(s)</h3>
-                    <div className="certificates-grid">
-                        {certificates.map((cert, idx) => (
-                            <div key={idx} className={`certificate-card ${cert.isRevoked ? 'revoked' : cert.isValid ? 'valid' : 'invalid'}`}>
-                                <div className="card-header">
-                                    <h4>📜 {cert.certificateId}</h4>
-                                    <span className={`status ${cert.isRevoked ? 'revoked' : cert.isValid ? 'valid' : 'invalid'}`}>
-                                        {cert.isRevoked ? '🚫 REVOKED' : cert.isValid ? '✅ VALID' : '❌ INVALID'}
-                                    </span>
-                                </div>
-
-                                <div className="card-body">
-                                    <p><strong>🏛️ Institution:</strong> {cert.institutionName}</p>
-                                    <p><strong>📚 Course:</strong> {cert.courseProgram}</p>
-                                    <p><strong>⭐ Grade:</strong> {cert.grade}</p>
-                                    <p><strong>👤 Issuer:</strong> <code>{cert.issuer.slice(0, 10)}...{cert.issuer.slice(-8)}</code></p>
-                                    <p><strong>📅 Issued:</strong> {cert.issueDate}</p>
-                                    <p><strong>⏰ Expires:</strong> {cert.expiryDate}</p>
-                                </div>
-                            </div>
-                        ))}
-                    </div>
+                <div className="card-body">
+                  <p><strong>🏛️ Institution:</strong> {cert.institutionName}</p>
+                  <p><strong>📚 Course:</strong> {cert.courseProgram}</p>
+                  <p><strong>⭐ Grade:</strong> {cert.grade}</p>
+                  <p><strong>👤 Issuer:</strong> <code>{cert.issuer.slice(0, 10)}...{cert.issuer.slice(-8)}</code></p>
+                  <p><strong>📅 Issued:</strong> {cert.issueDate}</p>
+                  <p><strong>⏰ Expires:</strong> {cert.expiryDate}</p>
                 </div>
-            )}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
-            <style jsx>{`
+      <style jsx>{`
         .student-certificates-container {
           max-width: 1000px;
           margin: 2rem auto;
@@ -318,8 +362,8 @@ function StudentCertificates() {
           }
         }
       `}</style>
-        </div>
-    );
+    </div>
+  );
 }
 
 export default StudentCertificates;

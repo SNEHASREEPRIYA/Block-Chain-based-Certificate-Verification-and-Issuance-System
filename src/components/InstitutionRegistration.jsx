@@ -10,7 +10,6 @@ function InstitutionRegistration() {
   const [institutionAddress, setInstitutionAddress] = useState('');
   const [institutionName, setInstitutionName] = useState('');
   const [email, setEmail] = useState('');
-  const [accreditationId, setAccreditationId] = useState('');
   const [country, setCountry] = useState('');
   const [feedback, setFeedback] = useState('');
   const [loading, setLoading] = useState(false);
@@ -44,7 +43,6 @@ function InstitutionRegistration() {
         address: institutionAddress.toLowerCase(),
         name: institutionName,
         email,
-        accreditationId,
         country
       };
 
@@ -73,7 +71,6 @@ function InstitutionRegistration() {
       setInstitutionAddress('');
       setInstitutionName('');
       setEmail('');
-      setAccreditationId('');
       setCountry('');
     } catch (err) {
       console.error('Registration error:', err);
@@ -120,16 +117,6 @@ function InstitutionRegistration() {
             type="email"
             value={email}
             onChange={(e) => setEmail(e.target.value)}
-            required
-          />
-        </div>
-
-        <div className="form-group">
-          <label>Accreditation ID</label>
-          <input
-            type="text"
-            value={accreditationId}
-            onChange={(e) => setAccreditationId(e.target.value)}
             required
           />
         </div>

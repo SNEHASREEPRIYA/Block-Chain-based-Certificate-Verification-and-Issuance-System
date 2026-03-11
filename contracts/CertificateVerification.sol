@@ -19,6 +19,7 @@ contract CertificateVerification is AccessControl, Pausable {
         string courseName;         // Name of the course
         string grade;              // Grade achieved
         uint256 expiryDate;        // Certificate expiry date
+        bytes32 certificateHash;   // Keccak256 hash of certificate data for integrity verification
     }
 
     // Mapping to store certificates
@@ -27,6 +28,10 @@ contract CertificateVerification is AccessControl, Pausable {
     mapping(address => string[]) private studentCertificates;
     // Mapping to track institution certificates
     mapping(string => string[]) private institutionCertificates;
+    // Mapping to store certificate hashes for verification
+    mapping(string => bytes32) private certificateHashes;
+    // Mapping to track revoked certificate hashes
+    mapping(bytes32 => bool) private revokedHashes;
 
     // Events
     event CertificateIssued(
@@ -37,10 +42,43 @@ contract CertificateVerification is AccessControl, Pausable {
         uint256 issueDate
     );
     event CertificateRevoked(string certificateId, address indexed issuer);
+    event CertificateHashVerified(
+        string certificateId,
+        bytes32 certificateHash,
+        bool isValid
+    );
 
     constructor() {
         _grantRole(DEFAULT_ADMIN_ROLE, msg.sender);
         _grantRole(ISSUER_ROLE, msg.sender);
+    }
+
+    /**
+     * @dev Computes Keccak256 hash of certificate data
+     * @param certificateId The certificate ID
+     * @param studentAddress The student's address
+     * @param institutionName The institution name
+     * @param courseName The course name
+     * @param grade The grade achieved
+     * @param expiryDate The certificate expiry date
+     * @return The Keccak256 hash of the certificate data
+     */
+    function computeCertificateHash(
+        string memory certificateId,
+        address studentAddress,
+        string memory institutionName,
+        string memory courseName,
+        string memory grade,
+        uint256 expiryDate
+    ) public pure returns (bytes32) {
+        return keccak256(abi.encodePacked(
+            certificateId,
+            studentAddress,
+            institutionName,
+            courseName,
+            grade,
+            expiryDate
+        ));
     }
 
     // Function to issue certificate with complete record
@@ -58,6 +96,16 @@ contract CertificateVerification is AccessControl, Pausable {
         require(studentAddress != address(0), "Invalid student address");
         require(certificates[certificateId].studentAddress == address(0), "Certificate ID already exists");
 
+        // Compute Keccak256 hash of certificate data
+        bytes32 certHash = computeCertificateHash(
+            certificateId,
+            studentAddress,
+            institutionName,
+            courseName,
+            grade,
+            expiryDate
+        );
+
         CertificateRecord memory newCertificate = CertificateRecord({
             certificateId: certificateId,
             studentAddress: studentAddress,
@@ -69,10 +117,12 @@ contract CertificateVerification is AccessControl, Pausable {
             institutionName: institutionName,
             courseName: courseName,
             grade: grade,
-            expiryDate: expiryDate
+            expiryDate: expiryDate,
+            certificateHash: certHash
         });
 
         certificates[certificateId] = newCertificate;
+        certificateHashes[certificateId] = certHash;
         studentCertificates[studentAddress].push(certificateId);
         institutionCertificates[institutionName].push(certificateId);
 
@@ -131,6 +181,16 @@ contract CertificateVerification is AccessControl, Pausable {
         require(bytes(ipfsHash).length > 0, "IPFS hash cannot be empty");
         require(certificates[certificateId].issueDate == 0, "Certificate ID already exists");
 
+        // Compute Keccak256 hash for this certificate
+        bytes32 certHash = computeCertificateHash(
+            certificateId,
+            studentAddress,
+            "",
+            "",
+            "",
+            0
+        );
+
         certificates[certificateId] = CertificateRecord({
             certificateId: certificateId,
             studentAddress: studentAddress,
@@ -142,8 +202,11 @@ contract CertificateVerification is AccessControl, Pausable {
             institutionName: "",
             courseName: "",
             grade: "",
-            expiryDate: 0
+            expiryDate: 0,
+            certificateHash: certHash
         });
+
+        certificateHashes[certificateId] = certHash;
 
         emit CertificateIssued(
             certificateId,
@@ -168,6 +231,9 @@ contract CertificateVerification is AccessControl, Pausable {
         require(certificates[certificateId].issuer == msg.sender, "Only issuer can revoke");
 
         certificates[certificateId].isRevoked = true;
+        // Track revoked hash
+        revokedHashes[certificates[certificateId].certificateHash] = true;
+        
         emit CertificateRevoked(certificateId, msg.sender);
     }
 
@@ -185,6 +251,51 @@ contract CertificateVerification is AccessControl, Pausable {
         certificate = certificates[certificateId];
         isValid = certificate.issueDate > 0 && !certificate.isRevoked;
         return (isValid, certificate);
+    }
+
+    /**
+     * @dev Verifies certificate integrity using Keccak256 hash
+     * @param certificateId ID of the certificate to verify
+     * @param providedHash The hash provided for verification
+     * @return isHashValid Whether the hash matches the stored hash
+     */
+    function verifyCertificateHash(string memory certificateId, bytes32 providedHash)
+        public
+        view
+        returns (bool isHashValid)
+    {
+        bytes32 storedHash = certificateHashes[certificateId];
+        require(storedHash != bytes32(0), "Certificate not found");
+        
+        isHashValid = storedHash == providedHash;
+        return isHashValid;
+    }
+
+    /**
+     * @dev Retrieves the Keccak256 hash for a certificate
+     * @param certificateId ID of the certificate
+     * @return The certificate hash
+     */
+    function getCertificateHash(string memory certificateId)
+        public
+        view
+        returns (bytes32)
+    {
+        require(certificateHashes[certificateId] != bytes32(0), "Certificate not found");
+        return certificateHashes[certificateId];
+    }
+
+    /**
+     * @dev Checks if a certificate hash has been revoked
+     * @param certificateHash The certificate hash to check
+     * @return hasBeenRevoked Whether the hash has been revoked
+     */
+    function isHashRevoked(bytes32 certificateHash)
+        public
+        view
+        returns (bool hasBeenRevoked)
+    {
+        return revokedHashes[certificateHash];
     }
 
     /**

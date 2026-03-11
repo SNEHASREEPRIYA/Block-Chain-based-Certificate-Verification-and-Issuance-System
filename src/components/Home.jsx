@@ -53,7 +53,6 @@ function Home() {
         institutionMap.set(lower, {
           name: inst.name,
           email: inst.email,
-          accreditationId: inst.accreditationId,
           country: inst.country,
           address: inst.address,
           certificateCount: 0,
@@ -65,7 +64,24 @@ function Home() {
       let institutionList = Array.from(institutionMap.values());
       setInstitutions(institutionList);
 
-      // 2. Try to get CertificateIssued events from blockchain to augment certificate counts
+      // 2. Count certificates from sessionStorage for each institution
+      const allCertificates = JSON.parse(sessionStorage.getItem('allIssuedCertificates')) || [];
+      allCertificates.forEach(cert => {
+        // Find which institution issued each certificate by checking the certificate data
+        try {
+          const certData = JSON.parse(sessionStorage.getItem(cert.certificateId));
+          if (certData && certData.institutionAddress) {
+            const issuerLower = certData.institutionAddress.toLowerCase();
+            if (institutionMap.has(issuerLower)) {
+              institutionMap.get(issuerLower).certificateCount += 1;
+            }
+          }
+        } catch (e) {
+          // ignore parsing errors
+        }
+      });
+
+      // 3. Try to get CertificateIssued events from blockchain to augment certificate counts
       try {
         const contract = await getContract();
         const filter = contract.filters ? contract.filters.CertificateIssued() : null;
@@ -85,7 +101,6 @@ function Home() {
             institutionMap.set(issuerAddress, {
               name: institutionName,
               email: 'N/A',
-              accreditationId: 'N/A',
               country: 'N/A',
               address: event.args.issuer,
               certificateCount: 1,
@@ -140,8 +155,7 @@ function Home() {
                 <h3>{inst.name}</h3>
                 <div className="details">
                   <p><strong>📧 Email:</strong> {inst.email}</p>
-                  <p><strong>🏛️ Accreditation ID:</strong> {inst.accreditationId}</p>
-                  <p><strong>🌍 Country:</strong> {inst.country}</p>
+                  <p><strong> Country:</strong> {inst.country}</p>
                   <p><strong>🔗 Address:</strong> <code>{inst.address.slice(0, 10)}...{inst.address.slice(-8)}</code></p>
                   <p><strong>📜 Certificates Issued:</strong> {inst.certificateCount}</p>
                   <p><strong>✅ Status:</strong> <span className="status-badge">{inst.source === 'registered' ? '🟢 Registered' : '🟣 Active'}</span></p>

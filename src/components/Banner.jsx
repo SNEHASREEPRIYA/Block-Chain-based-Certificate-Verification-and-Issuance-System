@@ -15,7 +15,7 @@ const Banner = () => {
           <img src="/certificate-check.png" alt="Certificate" style={styles.icon} />
         </div>
         <h1 style={styles.heading}>
-          Blockchain<br />-Based Certificate Verification System
+          Blockchain Based <br/> Certificate Issuance and <br /> Verification System
         </h1>
       </div>
     </div>

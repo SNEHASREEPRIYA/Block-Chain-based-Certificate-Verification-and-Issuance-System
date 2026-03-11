@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { ethers } from 'ethers';
 import QRCode from 'qrcode.react';
 import jsPDF from 'jspdf';
@@ -24,24 +24,92 @@ function CertificateIssuance() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [qrValue, setQrValue] = useState('');
+  const [currentAccount, setCurrentAccount] = useState('');
+  const [registeredInstitution, setRegisteredInstitution] = useState(null);
   const certificateRef = useRef();
+
+  // Check if current account is a registered institution
+  useEffect(() => {
+    const checkRegistration = async () => {
+      try {
+        const accounts = await window.ethereum?.request({ method: 'eth_accounts' });
+        if (accounts && accounts.length > 0) {
+          const account = accounts[0].toLowerCase();
+          setCurrentAccount(account);
+
+          // Check if this account is registered
+          const institutions = JSON.parse(sessionStorage.getItem('institutions')) || [];
+          const registered = institutions.find(inst => inst.address.toLowerCase() === account);
+          setRegisteredInstitution(registered);
+        }
+      } catch (err) {
+        console.error('Error checking institution registration:', err);
+      }
+    };
+
+    checkRegistration();
+
+    // Listen for account changes
+    const handleAccountsChanged = (accounts) => {
+      if (accounts.length > 0) {
+        const account = accounts[0].toLowerCase();
+        setCurrentAccount(account);
+        const institutions = JSON.parse(sessionStorage.getItem('institutions')) || [];
+        const registered = institutions.find(inst => inst.address.toLowerCase() === account);
+        setRegisteredInstitution(registered);
+      }
+    };
+
+    window.ethereum?.on('accountsChanged', handleAccountsChanged);
+    window.addEventListener('institutionsUpdated', checkRegistration);
+
+    return () => {
+      window.ethereum?.removeListener('accountsChanged', handleAccountsChanged);
+      window.removeEventListener('institutionsUpdated', checkRegistration);
+    };
+  }, []);
 
   const downloadCertificatePDF = async () => {
     try {
       const element = certificateRef.current;
-      const canvas = await html2canvas(element, { scale: 2, useCORS: true });
+
+      // Use higher scale for better quality
+      const canvas = await html2canvas(element, {
+        scale: 4,
+        useCORS: true,
+        backgroundColor: '#ffffff',
+        logging: false,
+        allowTaint: true
+      });
+
       const imgData = canvas.toDataURL('image/png');
 
+      // A4 landscape dimensions (297mm x 210mm)
       const pdf = new jsPDF({
         orientation: 'landscape',
         unit: 'mm',
         format: 'a4'
       });
 
-      const imgWidth = 297;
-      const imgHeight = (canvas.height * imgWidth) / canvas.width;
+      const pageWidth = pdf.internal.pageSize.getWidth();   // 297mm
+      const pageHeight = pdf.internal.pageSize.getHeight();  // 210mm
 
-      pdf.addImage(imgData, 'PNG', 0, 0, imgWidth, imgHeight);
+      // Calculate aspect ratio and size to fit on page
+      const imgAspectRatio = canvas.width / canvas.height;
+      let imgWidth = pageWidth - 15;  // Leave margins
+      let imgHeight = imgWidth / imgAspectRatio;
+
+      // If too tall, scale down by height
+      if (imgHeight > pageHeight - 10) {
+        imgHeight = pageHeight - 15;
+        imgWidth = imgHeight * imgAspectRatio;
+      }
+
+      // Center on page
+      const xPos = (pageWidth - imgWidth) / 2;
+      const yPos = (pageHeight - imgHeight) / 2;
+
+      pdf.addImage(imgData, 'PNG', xPos, yPos, imgWidth, imgHeight);
       pdf.save(`Certificate-${issuanceResult.certificateId}.pdf`);
     } catch (err) {
       alert('Failed to download certificate: ' + err.message);
@@ -61,6 +129,19 @@ function CertificateIssuance() {
         throw new Error('Certificate ID is required and must be unique');
       }
 
+      // Check if institution is registered
+      if (!registeredInstitution) {
+        throw new Error('❌ Your institution is not registered. Please register your institution first before issuing certificates.');
+      }
+
+      // Check if certificate ID already exists globally (across all institutions)
+      const allIssuedCertificates = JSON.parse(sessionStorage.getItem('allIssuedCertificates')) || [];
+      const certificateExists = allIssuedCertificates.some(cert => cert.certificateId === formData.certificateId);
+
+      if (certificateExists) {
+        throw new Error('❌ Certificate already exists with this ID, please give another ID');
+      }
+
       const accounts = await window.ethereum.request({ method: 'eth_requestAccounts' });
       const provider = new ethers.BrowserProvider(window.ethereum);
       const signer = await provider.getSigner();
@@ -78,16 +159,50 @@ function CertificateIssuance() {
 
       const expiryDate = Math.floor(new Date(formData.expiryDate).getTime() / 1000);
 
-      await issueCertificateWithRecord({
+      const issuanceResult = await issueCertificateWithRecord({
         certificateId: formData.certificateId,
         studentAddress: formData.studentAddress,
         ipfsHash: 'QmTest' + Math.random().toString(36).substr(2, 9),
         metadata: metadata,
-        institutionName: 'Institution',  // Default institution name
+        institutionName: registeredInstitution.name,  // Use registered institution name
         courseName: formData.courseProgram,
         grade: formData.grade,
         expiryDate: expiryDate
       });
+
+      // Store certificate data in sessionStorage for quick retrieval
+      const certificateData = {
+        certificateId: formData.certificateId,
+        studentAddress: formData.studentAddress,
+        studentName: formData.studentName,
+        studentId: formData.studentId,
+        courseProgram: formData.courseProgram,
+        grade: formData.grade,
+        completionDate: formData.completionDate,
+        expiryDate: expiryDate,  // Store as timestamp (seconds) not string - for proper hash verification
+        institutionAddress: registeredInstitution.address,  // Use registered institution address
+        institutionName: registeredInstitution.name,  // Use registered institution name
+        institutionCategory: formData.institutionCategory,
+        issueDate: new Date().toISOString(),
+        issuer: accounts[0],
+        transactionHash: issuanceResult.hash,
+        certificateHash: issuanceResult.certificateHash,
+        issuanceTimestamp: new Date().getTime()
+      };
+
+      // Save to sessionStorage with certificate ID as key
+      sessionStorage.setItem(formData.certificateId, JSON.stringify(certificateData));
+
+      // Also maintain a list of all issued certificates for current session
+      let allCertificates = JSON.parse(sessionStorage.getItem('allIssuedCertificates')) || [];
+      allCertificates.push({
+        certificateId: formData.certificateId,
+        studentAddress: formData.studentAddress,
+        timestamp: new Date().getTime()
+      });
+      sessionStorage.setItem('allIssuedCertificates', JSON.stringify(allCertificates));
+
+      const issueDateFormatted = new Date().toLocaleDateString();
 
       const qrData = JSON.stringify({
         certificateId: formData.certificateId,
@@ -100,8 +215,13 @@ function CertificateIssuance() {
       setIssuanceResult({
         certificateId: formData.certificateId,
         hash: 'Certificate issued successfully',
-        metadata: formData,
-        qrData: qrData
+        metadata: {
+          ...formData,
+          issueDate: issueDateFormatted
+        },
+        qrData: qrData,
+        transactionHash: issuanceResult.hash,
+        certificateHash: issuanceResult.certificateHash
       });
 
       setFormData({
@@ -128,8 +248,26 @@ function CertificateIssuance() {
       <h2 className="title">🎓 Issue Blockchain Certificate</h2>
       <WalletConnect />
 
+      {/* Institution Registration Status Alert */}
+      {currentAccount && (
+        <div className={`institution-status-alert ${registeredInstitution ? 'registered' : 'not-registered'}`}>
+          {registeredInstitution ? (
+            <>
+              <h3>✅ Institution Registered</h3>
+              <p className="address-info">Wallet Address: <code>{currentAccount.slice(0, 10)}...{currentAccount.slice(-8)}</code></p>
+            </>
+          ) : (
+            <>
+              <h3>❌ Institution Not Registered</h3>
+              <p className="warning-text">⚠️ Please register your institution first before issuing certificates.</p>
+              <p>Wallet: <code>{currentAccount.slice(0, 10)}...{currentAccount.slice(-8)}</code></p>
+            </>
+          )}
+        </div>
+      )}
+
       {!issuanceResult ? (
-        <form onSubmit={handleSubmit} className="certificate-form">
+        <form onSubmit={handleSubmit} className="certificate-form" style={{ opacity: registeredInstitution ? 1 : 0.5, pointerEvents: registeredInstitution ? 'auto' : 'none' }}>
           <div className="form-group">
             <label>📋 Certificate ID (Must be unique)</label>
             <input
@@ -238,29 +376,74 @@ function CertificateIssuance() {
       ) : (
         <div className="result-container">
           <div ref={certificateRef} className="certificate-content">
-            <div className="result-box success">
-              <h3>✅ Certificate Issued Successfully!</h3>
-              <p><strong>Certificate ID:</strong> {issuanceResult.certificateId}</p>
-              <p><strong>Student:</strong> {issuanceResult.metadata.studentName}</p>
-              <p><strong>Student ID:</strong> {issuanceResult.metadata.studentId}</p>
-              <p><strong>Course:</strong> {issuanceResult.metadata.courseProgram}</p>
-              <p><strong>Grade:</strong> {issuanceResult.metadata.grade}</p>
-              <p><strong>Completion Date:</strong> {issuanceResult.metadata.completionDate}</p>
-              <p><strong>Institution Address:</strong> {issuanceResult.metadata.institutionAddress}</p>
-              <p><strong>Issue Date:</strong> {new Date(issuanceResult.metadata.issueDate).toLocaleDateString()}</p>
-            </div>
-
-            <div className="qr-container">
-              <h3>📱 QR Code (Share with Student)</h3>
-              <div className="qr-box">
-                <QRCode
-                  value={qrValue}
-                  size={256}
-                  level="H"
-                  includeMargin={true}
-                />
+            {/* Professional Certificate Template */}
+            <div className="certificate-template">
+              {/* Header */}
+              <div className="cert-header">
+                <div className="cert-logo">🎓</div>
+                <h1 className="cert-title">CERTIFICATE OF ACHIEVEMENT</h1>
+                <p className="cert-subtitle">Blockchain-Verified Credential</p>
               </div>
-              <p className="qr-note">Student can scan this QR code to verify the certificate</p>
+
+              {/* Border decoration */}
+              <div className="cert-border-top"></div>
+
+              {/* Main Content */}
+              <div className="cert-body">
+                <p className="cert-intro">This certifies that</p>
+                <h2 className="cert-recipient">{issuanceResult.metadata.studentName}</h2>
+                <p className="cert-middle">has successfully completed</p>
+                <p className="cert-course">{issuanceResult.metadata.courseProgram}</p>
+                <p className="cert-middle">with a grade of</p>
+                <p className="cert-grade">{issuanceResult.metadata.grade}</p>
+
+                {/* Footer border */}
+                <div className="cert-border-bottom"></div>
+
+                {/* Details Table */}
+                <div className="cert-details">
+                  <div className="cert-detail-row">
+                    <span className="cert-detail-label">Certificate ID:</span>
+                    <span className="cert-detail-value">{issuanceResult.certificateId}</span>
+                  </div>
+                  <div className="cert-detail-row">
+                    <span className="cert-detail-label">Student ID:</span>
+                    <span className="cert-detail-value">{issuanceResult.metadata.studentId}</span>
+                  </div>
+                  <div className="cert-detail-row">
+                    <span className="cert-detail-label">Completion Date:</span>
+                    <span className="cert-detail-value">{issuanceResult.metadata.completionDate}</span>
+                  </div>
+                  <div className="cert-detail-row">
+                    <span className="cert-detail-label">Issue Date:</span>
+                    <span className="cert-detail-value">{issuanceResult.metadata.issueDate}</span>
+                  </div>
+                  <div className="cert-detail-row">
+                    <span className="cert-detail-label">Blockchain Verified:</span>
+                    <span className="cert-detail-value">✅ Yes</span>
+                  </div>
+                </div>
+
+                {/* QR Code */}
+                <div className="cert-qr-section">
+                  <p className="cert-qr-label">Verify</p>
+                  <div className="cert-qr-box">
+                    <QRCode
+                      value={qrValue}
+                      size={120}
+                      level="H"
+                      includeMargin={true}
+                    />
+                  </div>
+                  <p className="cert-qr-hint">Scan</p>
+                </div>
+              </div>
+
+              {/* Signature area */}
+              <div className="cert-signature">
+                <p className="signature-line">_________________</p>
+                <p className="signature-label">Authorized Issuer</p>
+              </div>
             </div>
           </div>
 
@@ -452,13 +635,297 @@ function CertificateIssuance() {
           transform: translateY(-2px);
         }
 
+        /* Professional Certificate Template Styles */
+        .certificate-template {
+          max-width: 850px;
+          width: 100%;
+          margin: 0 auto;
+          padding: 40px 50px;
+          background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
+          border: 4px solid #667eea;
+          border-radius: 12px;
+          position: relative;
+          box-shadow: 0 10px 30px rgba(102, 126, 234, 0.2);
+          display: flex;
+          flex-direction: column;
+          justify-content: space-between;
+          min-height: auto;
+          aspect-ratio: 11.7 / 8.3;
+        }
+
+        .cert-header {
+          text-align: center;
+          margin-bottom: 15px;
+        }
+
+        .cert-logo {
+          font-size: 45px;
+          margin-bottom: 8px;
+        }
+
+        .cert-title {
+          font-size: 36px;
+          margin: 0;
+          color: #667eea;
+          font-weight: 700;
+          letter-spacing: 1.5px;
+          text-transform: uppercase;
+          word-wrap: break-word;
+          overflow-wrap: break-word;
+        }
+
+        .cert-subtitle {
+          font-size: 14px;
+          color: #764ba2;
+          margin: 5px 0 0 0;
+          font-style: italic;
+        }
+
+        .cert-border-top {
+          height: 2px;
+          background: linear-gradient(90deg, transparent, #667eea, transparent);
+          margin: 15px 0;
+        }
+
+        .cert-body {
+          flex: 1;
+          display: flex;
+          flex-direction: column;
+          justify-content: center;
+          text-align: center;
+          padding-right: 120px;
+        }
+
+        .cert-intro {
+          font-size: 14px;
+          color: #333;
+          margin: 0 0 10px 0;
+          font-weight: 500;
+        }
+
+        .cert-recipient {
+          font-size: 32px;
+          color: #667eea;
+          margin: 0 0 15px 0;
+          font-weight: 700;
+          font-style: italic;
+          word-wrap: break-word;
+          overflow-wrap: break-word;
+        }
+
+        .cert-middle {
+          font-size: 13px;
+          color: #555;
+          margin: 8px 0;
+        }
+
+        .cert-course {
+          font-size: 18px;
+          color: #764ba2;
+          margin: 12px 0;
+          font-weight: 600;
+          word-wrap: break-word;
+          overflow-wrap: break-word;
+        }
+
+        .cert-grade {
+          font-size: 22px;
+          color: #28a745;
+          margin: 12px 0;
+          font-weight: 700;
+        }
+
+        .cert-border-bottom {
+          height: 2px;
+          background: linear-gradient(90deg, transparent, #667eea, transparent);
+          margin: 15px 0;
+        }
+
+        .cert-details {
+          display: grid;
+          grid-template-columns: 1fr 1fr;
+          gap: 10px 20px;
+          margin: 15px 0;
+          font-size: 11px;
+          background: rgba(102, 126, 234, 0.05);
+          padding: 12px 15px;
+          border-radius: 6px;
+          padding-right: 120px;
+        }
+
+        .cert-detail-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          overflow: hidden;
+        }
+
+        .cert-detail-label {
+          color: #667eea;
+          font-weight: 600;
+          flex-shrink: 0;
+        }
+
+        .cert-detail-value {
+          color: #333;
+          font-family: monospace;
+          font-size: 10px;
+          text-align: right;
+          margin-left: 10px;
+          overflow: hidden;
+          text-overflow: ellipsis;
+        }
+
+        .cert-qr-section {
+          position: absolute;
+          bottom: 20px;
+          right: 20px;
+          display: flex;
+          flex-direction: column;
+          align-items: center;
+          width: 100px;
+        }
+
+        .cert-qr-label {
+          font-size: 9px;
+          color: #667eea;
+          font-weight: 600;
+          margin: 0 0 3px 0;
+          text-align: center;
+        }
+
+        .cert-qr-box {
+          padding: 4px;
+          background: white;
+          border: 2px solid #ddd;
+          border-radius: 4px;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+        }
+
+        .cert-qr-hint {
+          font-size: 8px;
+          color: #999;
+          margin: 3px 0 0 0;
+          text-align: center;
+        }
+
+        .cert-signature {
+          text-align: center;
+          margin-top: 10px;
+        }
+
+        .signature-line {
+          margin: 0;
+          color: #333;
+          font-size: 12px;
+        }
+
+        .signature-label {
+          margin: 0;
+          color: #667eea;
+          font-size: 10px;
+          font-weight: 600;
+        }
+
+        @media (max-width: 1024px) {
+          .certificate-template {
+            max-width: 100%;
+            padding: 30px 35px;
+          }
+
+          .cert-body {
+            padding-right: 100px;
+          }
+
+          .cert-details {
+            padding-right: 100px;
+          }
+        }
+
         @media (max-width: 768px) {
           .certificate-container {
             padding: 1rem;
           }
 
-          .qr-box {
-            padding: 0.5rem;
+          .certificate-template {
+            max-width: 100%;
+            padding: 25px 20px;
+          }
+
+          .cert-title {
+            font-size: 28px;
+          }
+
+          .cert-recipient {
+            font-size: 24px;
+          }
+
+          .cert-details {
+            grid-template-columns: 1fr;
+            padding-right: 80px;
+          }
+
+          .cert-body {
+            padding-right: 80px;
+          }
+
+          .cert-qr-section {
+            width: 80px;
+            bottom: 15px;
+            right: 15px;
+          }
+        }
+
+        @media (max-width: 480px) {
+          .certificate-template {
+            padding: 20px 15px;
+            aspect-ratio: auto;
+          }
+
+          .cert-logo {
+            font-size: 30px;
+          }
+
+          .cert-title {
+            font-size: 20px;
+            letter-spacing: 0.5px;
+          }
+
+          .cert-subtitle {
+            font-size: 12px;
+          }
+
+          .cert-recipient {
+            font-size: 18px;
+          }
+
+          .cert-course {
+            font-size: 14px;
+          }
+
+          .cert-grade {
+            font-size: 18px;
+          }
+
+          .cert-details {
+            grid-template-columns: 1fr;
+            font-size: 9px;
+            padding: 10px;
+            padding-right: 75px;
+          }
+
+          .cert-body {
+            padding-right: 75px;
+          }
+
+          .cert-qr-section {
+            width: 70px;
+          }
+
+          .cert-detail-value {
+            font-size: 8px;
           }
         }
       `}</style>
