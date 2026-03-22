@@ -1,5 +1,11 @@
 import React, { useState } from 'react';
 import { getContract } from '../utils/certificateContract';
+import { getDocument, GlobalWorkerOptions } from 'pdfjs-dist';
+import workerSrc from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
+import AuthorizationPDFGenerator from './AuthorizationPDFGenerator';
+
+// Set worker path for pdfjs-dist using Vite URL import for local resolution
+GlobalWorkerOptions.workerSrc = workerSrc;
 
 function StudentCertificates() {
   const [studentAddress, setStudentAddress] = useState('');
@@ -7,8 +13,166 @@ function StudentCertificates() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [searched, setSearched] = useState(false);
+  const [isAuthorized, setIsAuthorized] = useState(false);
+  const [authorizationPdf, setAuthorizationPdf] = useState(null);
+  const [pdfUploadError, setPdfUploadError] = useState('');
+  const [pdfParsingResult, setPdfParsingResult] = useState(null);
+  const [authorizationLoading, setAuthorizationLoading] = useState(false);
+
+  // Required authorization phrase that must be present in the PDF
+  const REQUIRED_AUTH_PHRASE = 'AUTHORISED!! ELIGIBLE TO GET CERTIFICATE';
+
+  const parseAuthorizationPDF = async (file) => {
+    try {
+      const buffer = await file.arrayBuffer();
+      const loadingTask = getDocument({ data: buffer, disableWorker: true });
+      const pdf = await loadingTask.promise;
+      const page = await pdf.getPage(1);
+      const content = await page.getTextContent();
+      const text = content.items.map(w => w.str).join(' ');
+
+      const hasRequiredPhrase = text.toUpperCase().includes(REQUIRED_AUTH_PHRASE.toUpperCase());
+
+      if (!hasRequiredPhrase) {
+        throw new Error('PDF does not contain required authorization phrase. Please ensure the document includes "authorised!! Eligible to get certificate".');
+      }
+
+      // Extract student information from the PDF, even when content is inline without newlines
+      const extractStudentInfo = (text) => {
+        const studentNameMatch = text.match(/Student\s*Name\s*[:\-]?\s*([\s\S]*?)(?=\s*Student\s*ID\s*[:\-]?\s*|$)/i);
+        const studentIdMatch = text.match(/Student\s*ID\s*[:\-]?\s*([\s\S]*?)(?=\s*Blockchain\s*Address\s*[:\-]?\s*|$)/i);
+        const blockchainAddressMatch = text.match(/Blockchain\s*Address\s*[:\-]?\s*([\s\S]*?)(?=\s*Institution\s*Information\s*|$)/i);
+
+        const studentName = studentNameMatch ? studentNameMatch[1].replace(/\s+/g, ' ').trim() : '';
+        const studentId = studentIdMatch ? studentIdMatch[1].replace(/\s+/g, ' ').trim() : '';
+        const blockchainAddress = blockchainAddressMatch ? blockchainAddressMatch[1].replace(/\s+/g, ' ').trim() : '';
+
+        return {
+          studentName,
+          studentId,
+          blockchainAddress
+        };
+      };
+
+      const studentInfo = extractStudentInfo(text);
+
+      // Validate that student information is present
+      if (!studentInfo.studentName || !studentInfo.studentId) {
+        throw new Error('PDF must contain student name and student ID. Please fill in the authorization form completely.');
+      }
+
+      return {
+        isValid: true,
+        content: text,
+        hasRequiredPhrase,
+        studentInfo
+      };
+    } catch (err) {
+      console.error('PDF parsing error:', err);
+      throw err;
+    }
+  };
+
+  const validateStudentInBlockchain = async (studentInfo) => {
+    try {
+      // Check if student information exists in any issued certificates
+      const allIssuedCerts = JSON.parse(sessionStorage.getItem('allIssuedCertificates')) || [];
+
+      let studentFound = false;
+      let matchingCertificates = [];
+
+      for (const cert of allIssuedCerts) {
+        const certData = JSON.parse(sessionStorage.getItem(cert.certificateId));
+        if (certData) {
+          // Check if student name and ID match (case insensitive)
+          const nameMatch = certData.studentName?.toLowerCase().trim() === studentInfo.studentName.toLowerCase().trim();
+          const idMatch = certData.studentId?.toLowerCase().trim() === studentInfo.studentId.toLowerCase().trim();
+
+          if (nameMatch && idMatch) {
+            studentFound = true;
+            matchingCertificates.push({
+              certificateId: cert.certificateId,
+              studentAddress: certData.studentAddress,
+              institutionName: certData.institutionName,
+              courseName: certData.courseProgram,
+              grade: certData.grade
+            });
+          }
+        }
+      }
+
+      return {
+        isValid: studentFound,
+        matchingCertificates,
+        studentInfo
+      };
+    } catch (err) {
+      console.error('Blockchain validation error:', err);
+      return {
+        isValid: false,
+        matchingCertificates: [],
+        studentInfo,
+        error: err.message
+      };
+    }
+  };
+
+  const handleAuthorizationUpload = async (event) => {
+    const file = event.target.files?.[0];
+    setPdfUploadError('');
+    setPdfParsingResult(null);
+    setAuthorizationPdf(null);
+
+    if (!file) {
+      return;
+    }
+
+    if (file.type !== 'application/pdf') {
+      setPdfUploadError('Please upload a PDF file.');
+      return;
+    }
+
+    setAuthorizationLoading(true);
+    try {
+      // Parse PDF and extract student information
+      const parseResult = await parseAuthorizationPDF(file);
+
+      // Validate student information against blockchain
+      const validationResult = await validateStudentInBlockchain(parseResult.studentInfo);
+
+      const isFullyValid = parseResult.isValid && validationResult.isValid;
+
+      setPdfParsingResult({
+        status: 'validated',
+        isValid: isFullyValid,
+        content: parseResult.content,
+        hasRequiredPhrase: parseResult.hasRequiredPhrase,
+        studentInfo: parseResult.studentInfo,
+        blockchainValidation: validationResult
+      });
+
+      setAuthorizationPdf(file);
+      setIsAuthorized(isFullyValid);
+
+      if (isFullyValid) {
+        setPdfUploadError('');
+      } else if (!validationResult.isValid) {
+        setPdfUploadError(`Student information not found in blockchain records. Please ensure your name "${parseResult.studentInfo.studentName}" and ID "${parseResult.studentInfo.studentId}" match your issued certificates.`);
+      }
+    } catch (err) {
+      setPdfUploadError(err.message || 'Failed to parse authorization PDF');
+      console.error('Authorization PDF upload error:', err);
+    } finally {
+      setAuthorizationLoading(false);
+    }
+  };
 
   const handleSearch = async () => {
+    if (!isAuthorized) {
+      setError('Please upload authorization PDF first to access certificates');
+      return;
+    }
+
     if (!studentAddress.trim()) {
       setError('Please enter a student address');
       return;
@@ -112,11 +276,135 @@ function StudentCertificates() {
     }
   };
 
+  const downloadCertificate = async (certificateId) => {
+    try {
+      // Get certificate data from sessionStorage
+      const certData = JSON.parse(sessionStorage.getItem(certificateId));
+      if (!certData) {
+        alert('Certificate data not found. Please contact the institution.');
+        return;
+      }
+
+      // Generate and download PDF certificate
+      const { jsPDF } = await import('jspdf');
+      const pdf = new jsPDF({
+        orientation: 'landscape',
+        unit: 'mm',
+        format: 'a4'
+      });
+
+      // Certificate content
+      pdf.setFontSize(24);
+      pdf.setTextColor(102, 126, 234); // Blue color
+      pdf.text('CERTIFICATE OF COMPLETION', 148.5, 30, { align: 'center' });
+
+      pdf.setFontSize(16);
+      pdf.setTextColor(0, 0, 0);
+      pdf.text('This is to certify that', 148.5, 50, { align: 'center' });
+
+      pdf.setFontSize(20);
+      pdf.setTextColor(102, 126, 234);
+      pdf.text(certData.studentName || 'Student', 148.5, 65, { align: 'center' });
+
+      pdf.setFontSize(16);
+      pdf.setTextColor(0, 0, 0);
+      pdf.text('has successfully completed the course', 148.5, 85, { align: 'center' });
+
+      pdf.setFontSize(18);
+      pdf.setTextColor(102, 126, 234);
+      pdf.text(certData.courseProgram || 'Course', 148.5, 100, { align: 'center' });
+
+      pdf.setFontSize(16);
+      pdf.setTextColor(0, 0, 0);
+      pdf.text(`with grade: ${certData.grade || 'N/A'}`, 148.5, 115, { align: 'center' });
+
+      pdf.setFontSize(14);
+      pdf.text(`Certificate ID: ${certificateId}`, 148.5, 135, { align: 'center' });
+      pdf.text(`Institution: ${certData.institutionName || 'Institution'}`, 148.5, 145, { align: 'center' });
+      pdf.text(`Issue Date: ${certData.issueDate || 'N/A'}`, 148.5, 155, { align: 'center' });
+      pdf.text(`Expiry Date: ${certData.expiryDate || 'N/A'}`, 148.5, 165, { align: 'center' });
+
+      // Add authorization signature in green
+      pdf.setTextColor(0, 128, 0); // Green color
+      pdf.setFontSize(12);
+      pdf.text('AUTHORIZED BY INSTITUTION', 148.5, 185, { align: 'center' });
+      pdf.text('DIGITAL SIGNATURE VERIFIED', 148.5, 195, { align: 'center' });
+
+      pdf.save(`Certificate-${certificateId}.pdf`);
+    } catch (err) {
+      console.error('Error downloading certificate:', err);
+      alert('Failed to download certificate. Please try again.');
+    }
+  };
+
   return (
     <div className="student-certificates-container">
       <h2 className="title">🎓 Student Certificates</h2>
 
+      {/* Sample PDF Generator for Testing */}
+      <AuthorizationPDFGenerator />
+
+      {/* Authorization Section */}
+      <div className="authorization-section">
+        <h3>🔐 Certificate Access Authorization</h3>
+        <p className="auth-description">
+          To access your certificates, you must upload an authorization PDF provided by your institution.
+          The PDF must include the exact phrase "authorised!! Eligible to get certificate" and student details.
+        </p>
+
+        <div className="upload-section">
+          <input
+            type="file"
+            accept="application/pdf"
+            onChange={handleAuthorizationUpload}
+            disabled={authorizationLoading || isAuthorized}
+            className="file-input"
+          />
+
+          {authorizationLoading && <div className="alert info">⏳ Processing authorization PDF...</div>}
+
+          {pdfUploadError && <div className="alert error">❌ {pdfUploadError}</div>}
+
+          {pdfParsingResult?.status === 'validated' && pdfParsingResult.isValid && (
+            <div className="alert success">
+              ✅ Authorization PDF fully verified and validated!
+              <br />
+              <small>
+                Required phrase: {pdfParsingResult.hasRequiredPhrase ? '✅' : '❌'} |
+                Blockchain: {pdfParsingResult.blockchainValidation?.isValid ? '✅' : '❌'} Student Verified
+              </small>
+              {pdfParsingResult.studentInfo && (
+                <div style={{ marginTop: '10px', fontSize: '12px' }}>
+                  <strong>Verified Student:</strong> {pdfParsingResult.studentInfo.studentName} (ID: {pdfParsingResult.studentInfo.studentId})
+                </div>
+              )}
+            </div>
+          )}
+
+          {pdfParsingResult?.status === 'validated' && !pdfParsingResult.isValid && pdfParsingResult.blockchainValidation && (
+            <div className="alert warning">
+              ⚠️ Document validated but student blockchain verification failed
+              <br />
+              <small>
+                Required phrase: {pdfParsingResult.hasRequiredPhrase ? '✅' : '❌'} |
+                Blockchain: ❌ Student Not Found
+              </small>
+            </div>
+          )}
+        </div>
+
+        <div className="auth-requirements">
+          <h4>📋 Authorization PDF Requirements:</h4>
+          <ul>
+            <li>✅ Must contain exact phrase: "authorised!! Eligible to get certificate"</li>
+            <li>✅ Must contain student name and ID (matching blockchain records)</li>
+            <li>✅ Student must have at least one issued certificate on record</li>
+          </ul>
+        </div>
+      </div>
+
       <div className="search-section">
+        <h3>🔍 Search Your Certificates</h3>
         <div className="search-box">
           <input
             type="text"
@@ -124,11 +412,17 @@ function StudentCertificates() {
             value={studentAddress}
             onChange={(e) => setStudentAddress(e.target.value)}
             onKeyPress={(e) => e.key === 'Enter' && handleSearch()}
+            disabled={!isAuthorized}
           />
-          <button onClick={handleSearch} disabled={loading} className="search-btn">
+          <button onClick={handleSearch} disabled={!isAuthorized || loading} className="search-btn">
             {loading ? '🔄 Searching...' : '🔍 Search Certificates'}
           </button>
         </div>
+        {!isAuthorized && (
+          <div className="alert info" style={{ marginTop: '8px' }}>
+            🔐 Please upload a valid authorized PDF first to enable search.
+          </div>
+        )}
       </div>
 
       {error && <div className="alert error">❌ {error}</div>}
@@ -159,6 +453,16 @@ function StudentCertificates() {
                   <p><strong>👤 Issuer:</strong> <code>{cert.issuer.slice(0, 10)}...{cert.issuer.slice(-8)}</code></p>
                   <p><strong>📅 Issued:</strong> {cert.issueDate}</p>
                   <p><strong>⏰ Expires:</strong> {cert.expiryDate}</p>
+                </div>
+
+                <div className="card-actions">
+                  <button
+                    onClick={() => downloadCertificate(cert.certificateId)}
+                    className="download-btn"
+                    disabled={cert.isRevoked}
+                  >
+                    📥 Download Certificate
+                  </button>
                 </div>
               </div>
             ))}
@@ -226,6 +530,111 @@ function StudentCertificates() {
         .search-btn:disabled {
           opacity: 0.6;
           cursor: not-allowed;
+        }
+
+        .authorization-section {
+          background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+          padding: 2rem;
+          border-radius: 12px;
+          margin-bottom: 2rem;
+          border: 2px solid #dee2e6;
+        }
+
+        .authorization-section h3 {
+          color: #495057;
+          margin-bottom: 1rem;
+          font-size: 1.4rem;
+        }
+
+        .auth-description {
+          color: #6c757d;
+          margin-bottom: 1.5rem;
+          line-height: 1.6;
+        }
+
+        .upload-section {
+          margin-bottom: 1.5rem;
+        }
+
+        .file-input {
+          display: block;
+          width: 100%;
+          padding: 0.75rem;
+          border: 2px dashed #dee2e6;
+          border-radius: 8px;
+          background: white;
+          font-size: 1rem;
+          cursor: pointer;
+          transition: border-color 0.3s ease;
+        }
+
+        .file-input:hover:not(:disabled) {
+          border-color: #667eea;
+        }
+
+        .file-input:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+
+        .auth-requirements {
+          background: white;
+          padding: 1.5rem;
+          border-radius: 8px;
+          border-left: 4px solid #28a745;
+        }
+
+        .auth-requirements h4 {
+          color: #495057;
+          margin-bottom: 1rem;
+          font-size: 1.1rem;
+        }
+
+        .auth-requirements ul {
+          list-style: none;
+          padding: 0;
+          margin: 0;
+        }
+
+        .auth-requirements li {
+          padding: 0.5rem 0;
+          color: #495057;
+          font-size: 0.95rem;
+        }
+
+        .alert.success {
+          background: #d4edda;
+          color: #155724;
+          border: 2px solid #c3e6cb;
+        }
+
+        .card-actions {
+          padding: 1rem 1.5rem;
+          background: #f8f9fa;
+          border-top: 1px solid #dee2e6;
+        }
+
+        .download-btn {
+          width: 100%;
+          padding: 0.75rem;
+          background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+          color: white;
+          border: none;
+          border-radius: 8px;
+          font-size: 1rem;
+          font-weight: 600;
+          cursor: pointer;
+          transition: transform 0.3s ease;
+        }
+
+        .download-btn:hover:not(:disabled) {
+          transform: translateY(-2px);
+        }
+
+        .download-btn:disabled {
+          opacity: 0.6;
+          cursor: not-allowed;
+          background: #6c757d;
         }
 
         .alert {

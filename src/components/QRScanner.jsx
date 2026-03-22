@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Html5QrcodeScanner } from 'html5-qrcode';
 
-function QRScanner() {
+function QRScanner({ onResult, onError }) {
   const [result, setResult] = useState('');
   const [error, setError] = useState('');
 
@@ -17,10 +17,28 @@ function QRScanner() {
     scanner.render(
       (data) => {
         setResult(data);
+        setError('');
+        if (onResult) onResult(data);
         scanner.clear();
       },
       (err) => {
-        setError('Error scanning QR code: ' + err);
+        // html5-qrcode calls error callback frequently while scanning until a valid QR is found.
+        // Ignore the expected "NotFoundException" for each non-detected frame so UI stays clean.
+        const errMsg =
+          typeof err === 'string'
+            ? err
+            : err?.message
+              ? err.message
+              : JSON.stringify(err || 'Unknown scan error');
+
+        if (errMsg.includes('NotFoundException') || errMsg.includes('No MultiFormat Readers were able to detect')) {
+          console.debug('QR scanning frame no code found (expected):', errMsg);
+          return;
+        }
+
+        const message = 'Error scanning QR code: ' + errMsg;
+        setError(message);
+        if (onError) onError(message);
       }
     );
 
@@ -31,13 +49,15 @@ function QRScanner() {
 
   return (
     <div className="qr-scanner">
-      <h2>QR Code Scanner</h2>
+      {!result && <h2>QR Code Scanner</h2>}
       <div id="reader" className="scanner-container"></div>
       {result && (
-        <div className="result">
-          <h3>Scanned Result:</h3>
-          <p>{result}</p>
-        </div>
+        <>
+          <h3>Scanned result <small>(QR gives the unique certificate ID)</small></h3>
+          <div className="result">
+            <pre>{String(result).trim()}</pre>
+          </div>
+        </>
       )}
       {error && <div className="error">{error}</div>}
 
@@ -65,6 +85,18 @@ function QRScanner() {
           padding: 1rem;
           background: #e8f5e9;
           border-radius: 8px;
+          max-height: 180px;
+          overflow: auto;
+          word-break: break-all;
+        }
+
+        .result pre {
+          margin:0;
+          white-space: pre-wrap;
+          word-wrap: break-word;
+          font-size: 0.9rem;
+          line-height: 1.3;
+          color: #23395d;
         }
 
         .error {

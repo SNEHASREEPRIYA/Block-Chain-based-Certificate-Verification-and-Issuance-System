@@ -206,6 +206,36 @@ export const verifyCertificate = async (certificateId) => {
                 throw new Error('Invalid certificate data');
             }
 
+            const parseDate = (value) => {
+                if (value === null || value === undefined || value === '' || value === 0) {
+                    return { display: 'N/A', raw: 0 };
+                }
+
+                let rawValue = typeof value === 'number' ? value : Number(value);
+                let dateObj;
+
+                if (!isNaN(rawValue) && rawValue > 0) {
+                    // If value is a timestamp in seconds
+                    dateObj = new Date(rawValue * 1000);
+                } else {
+                    // Try to parse ISO string or other formats
+                    dateObj = new Date(value);
+                    if (isNaN(dateObj.getTime())) {
+                        return { display: String(value), raw: 0 };
+                    }
+                    rawValue = Math.floor(dateObj.getTime() / 1000);
+                }
+
+                if (isNaN(dateObj.getTime())) {
+                    return { display: 'Invalid Date', raw: 0 };
+                }
+
+                return { display: dateObj.toLocaleString(), raw: rawValue };
+            };
+
+            const issueDateInfo = parseDate(certificate.issueDate);
+            const expiryDateInfo = parseDate(certificate.expiryDate);
+
             return {
                 isValid,
                 source: 'blockchain',
@@ -216,10 +246,10 @@ export const verifyCertificate = async (certificateId) => {
                     institutionName: certificate.institutionName,
                     courseName: certificate.courseName,
                     grade: certificate.grade,
-                    issueDate: certificate.issueDate ? new Date(Number(certificate.issueDate) * 1000).toLocaleString() : 'N/A',
-                    issueDate_raw: Number(certificate.issueDate) || 0,
-                    expiryDate: certificate.expiryDate ? new Date(Number(certificate.expiryDate) * 1000).toLocaleString() : 'N/A',
-                    expiryDate_raw: Number(certificate.expiryDate) || 0,
+                    issueDate: issueDateInfo.display,
+                    issueDate_raw: issueDateInfo.raw,
+                    expiryDate: expiryDateInfo.display,
+                    expiryDate_raw: expiryDateInfo.raw,
                     isRevoked: certificate.isRevoked,
                     ipfsHash: certificate.ipfsHash,
                     metadata: certificate.metadata,
@@ -230,10 +260,55 @@ export const verifyCertificate = async (certificateId) => {
             console.warn('Blockchain lookup failed, trying sessionStorage fallback:', blockchainError.message);
 
             // Fallback to sessionStorage with case-insensitive lookup
-            const sessionData = sessionStorage.getItem(certificateId);
+            let sessionData = sessionStorage.getItem(certificateId);
+            if (!sessionData) {
+                const allKeys = Object.keys(sessionStorage);
+                const foundKey = allKeys.find((k) => k.toLowerCase() === certificateId.toLowerCase());
+                if (foundKey) {
+                    sessionData = sessionStorage.getItem(foundKey);
+                }
+            }
+
             if (sessionData) {
                 const certData = JSON.parse(sessionData);
                 console.log('Certificate found in sessionStorage:', certData);
+
+                const parsePayloadDate = (value, rawValue) => {
+                    if (rawValue && Number(rawValue) > 0) {
+                        const parsed = new Date(Number(rawValue) * 1000);
+                        if (!isNaN(parsed.getTime())) {
+                            return { display: parsed.toLocaleString(), raw: Number(rawValue) };
+                        }
+                    }
+
+                    if (!value) return { display: 'N/A', raw: 0 };
+
+                    let dateObj = new Date(value);
+                    if (isNaN(dateObj.getTime())) {
+                        const parts = String(value).trim().split(/[\s,]+/).filter(Boolean);
+                        if (parts.length > 0) {
+                            const datePart = parts[0];
+                            const timePart = parts.slice(1).join(' ') || '00:00:00';
+                            const matches = datePart.match(/^(\d{1,2})[\/\-](\d{1,2})[\/\-](\d{4})$/);
+                            if (matches) {
+                                const day = Number(matches[1]);
+                                const month = Number(matches[2]) - 1;
+                                const year = Number(matches[3]);
+                                const [hour, min, sec] = (timePart || '00:00:00').split(':').map((x) => Number(x));
+                                dateObj = new Date(year, month, day, hour || 0, min || 0, sec || 0);
+                            }
+                        }
+                    }
+
+                    if (isNaN(dateObj.getTime())) {
+                        return { display: String(value), raw: 0 };
+                    }
+
+                    return { display: dateObj.toLocaleString(), raw: Math.floor(dateObj.getTime() / 1000) };
+                };
+
+                const issueInfo = parsePayloadDate(certData.issueDate, certData.issueDate_raw);
+                const expiryInfo = parsePayloadDate(certData.expiryDate, certData.expiryDate_raw);
 
                 return {
                     isValid: true,
@@ -245,10 +320,10 @@ export const verifyCertificate = async (certificateId) => {
                         institutionName: certData.institutionName || 'Institution',
                         courseName: certData.courseProgram,
                         grade: certData.grade,
-                        issueDate: certData.issueDate ? new Date(certData.issueDate).toLocaleString() : 'N/A',
-                        issueDate_raw: 0,
-                        expiryDate: (typeof certData.expiryDate === 'number') ? new Date(certData.expiryDate * 1000).toLocaleString() : new Date(certData.expiryDate).toLocaleString(),
-                        expiryDate_raw: typeof certData.expiryDate === 'number' ? certData.expiryDate : Math.floor(new Date(certData.expiryDate).getTime() / 1000),
+                        issueDate: issueInfo.display,
+                        issueDate_raw: issueInfo.raw,
+                        expiryDate: expiryInfo.display,
+                        expiryDate_raw: expiryInfo.raw,
                         isRevoked: false,
                         ipfsHash: certData.ipfsHash || '',
                         metadata: certData.metadata || '',

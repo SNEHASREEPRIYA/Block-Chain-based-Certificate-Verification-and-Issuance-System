@@ -110,6 +110,16 @@ function CertificateIssuance() {
       const yPos = (pageHeight - imgHeight) / 2;
 
       pdf.addImage(imgData, 'PNG', xPos, yPos, imgWidth, imgHeight);
+
+      // Add hidden payload to PDF for robust upload-based verification
+      if (issuanceResult?.certificatePayload) {
+        const payloadText = `CERT_PAYLOAD:${JSON.stringify(issuanceResult.certificatePayload)}`;
+        // Put small, near-invisible text in the bottom margin so human-readable layout isn't affected.
+        pdf.setFontSize(1);
+        pdf.setTextColor(255, 255, 255);
+        pdf.text(payloadText, 5, pageHeight - 3);
+      }
+
       pdf.save(`Certificate-${issuanceResult.certificateId}.pdf`);
     } catch (err) {
       alert('Failed to download certificate: ' + err.message);
@@ -179,11 +189,13 @@ function CertificateIssuance() {
         courseProgram: formData.courseProgram,
         grade: formData.grade,
         completionDate: formData.completionDate,
-        expiryDate: expiryDate,  // Store as timestamp (seconds) not string - for proper hash verification
+        expiryDate: formData.expiryDate,  // Store as date string for display
+        expiryDate_raw: expiryDate,  // Timestamp for hashing / contract
         institutionAddress: registeredInstitution.address,  // Use registered institution address
         institutionName: registeredInstitution.name,  // Use registered institution name
         institutionCategory: formData.institutionCategory,
-        issueDate: new Date().toISOString(),
+        issueDate: new Date().toLocaleDateString(),
+        issueDate_raw: Math.floor(Date.now() / 1000),
         issuer: accounts[0],
         transactionHash: issuanceResult.hash,
         certificateHash: issuanceResult.certificateHash,
@@ -202,14 +214,23 @@ function CertificateIssuance() {
       });
       sessionStorage.setItem('allIssuedCertificates', JSON.stringify(allCertificates));
 
-      const issueDateFormatted = new Date().toLocaleDateString();
-
-      const qrData = JSON.stringify({
+      // Embed the full canonical payload for hashing and verification
+      const currentTimestamp = Math.floor(Date.now() / 1000);
+      const issueDateFormatted = new Date().toLocaleString();
+      const certificatePayload = {
         certificateId: formData.certificateId,
         studentAddress: formData.studentAddress,
-        issuerAddress: accounts[0]
-      });
+        institutionName: registeredInstitution.name,
+        courseName: formData.courseProgram,
+        grade: formData.grade,
+        expiryDate: expiryDate,
+        issueDate: issueDateFormatted,
+        issueDate_raw: currentTimestamp,
+        expiryDate_raw: expiryDate
+      };
 
+      // Store minimal QR payload: only certificateId (plain string).
+      const qrData = formData.certificateId;
       setQrValue(qrData);
 
       setIssuanceResult({
@@ -220,6 +241,7 @@ function CertificateIssuance() {
           issueDate: issueDateFormatted
         },
         qrData: qrData,
+        certificatePayload: certificatePayload,
         transactionHash: issuanceResult.hash,
         certificateHash: issuanceResult.certificateHash
       });
@@ -378,6 +400,7 @@ function CertificateIssuance() {
           <div ref={certificateRef} className="certificate-content">
             {/* Professional Certificate Template */}
             <div className="certificate-template">
+              <div className="cert-unique-id-badge">ID: {issuanceResult.certificateId}</div>
               {/* Header */}
               <div className="cert-header">
                 <div className="cert-logo">🎓</div>
@@ -407,12 +430,28 @@ function CertificateIssuance() {
                     <span className="cert-detail-value">{issuanceResult.certificateId}</span>
                   </div>
                   <div className="cert-detail-row">
+                    <span className="cert-detail-label">Institution Name:</span>
+                    <span className="cert-detail-value">{issuanceResult.metadata.institutionName || registeredInstitution?.name || 'Unknown'}</span>
+                  </div>
+                  <div className="cert-detail-row">
+                    <span className="cert-detail-label">Institution Address:</span>
+                    <span className="cert-detail-value">{registeredInstitution?.address || issuanceResult.metadata.institutionAddress || 'Unknown'}</span>
+                  </div>
+                  <div className="cert-detail-row">
+                    <span className="cert-detail-label">Student Address:</span>
+                    <span className="cert-detail-value">{issuanceResult.metadata.studentAddress}</span>
+                  </div>
+                  <div className="cert-detail-row">
                     <span className="cert-detail-label">Student ID:</span>
                     <span className="cert-detail-value">{issuanceResult.metadata.studentId}</span>
                   </div>
                   <div className="cert-detail-row">
                     <span className="cert-detail-label">Completion Date:</span>
                     <span className="cert-detail-value">{issuanceResult.metadata.completionDate}</span>
+                  </div>
+                  <div className="cert-detail-row">
+                    <span className="cert-detail-label">Expiry Date:</span>
+                    <span className="cert-detail-value">{issuanceResult.metadata.expiryDate}</span>
                   </div>
                   <div className="cert-detail-row">
                     <span className="cert-detail-label">Issue Date:</span>
@@ -430,9 +469,10 @@ function CertificateIssuance() {
                   <div className="cert-qr-box">
                     <QRCode
                       value={qrValue}
-                      size={120}
-                      level="H"
-                      includeMargin={true}
+                      size={100}
+                      level="M"
+                      includeMargin={false}
+                      renderAs="svg"
                     />
                   </div>
                   <p className="cert-qr-hint">Scan</p>
@@ -637,20 +677,36 @@ function CertificateIssuance() {
 
         /* Professional Certificate Template Styles */
         .certificate-template {
-          max-width: 850px;
+          max-width: 760px;
           width: 100%;
           margin: 0 auto;
-          padding: 40px 50px;
+          padding: 28px 30px;
           background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
-          border: 4px solid #667eea;
+          border: 3px solid #667eea;
           border-radius: 12px;
           position: relative;
-          box-shadow: 0 10px 30px rgba(102, 126, 234, 0.2);
+          box-shadow: 0 10px 25px rgba(102, 126, 234, 0.2);
           display: flex;
           flex-direction: column;
           justify-content: space-between;
-          min-height: auto;
+          min-height: 460px;
           aspect-ratio: 11.7 / 8.3;
+          overflow: hidden;
+        }
+
+        .cert-unique-id-badge {
+          position: absolute;
+          top: 14px;
+          right: 16px;
+          background: rgba(255, 255, 255, 0.95);
+          color: #0f2a5c;
+          border: 1px solid #667eea;
+          border-radius: 6px;
+          padding: 4px 10px;
+          font-size: 11px;
+          font-weight: 700;
+          box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+          z-index: 5;
         }
 
         .cert-header {
@@ -778,12 +834,38 @@ function CertificateIssuance() {
 
         .cert-qr-section {
           position: absolute;
-          bottom: 20px;
-          right: 20px;
+          bottom: 16px;
+          right: 16px;
           display: flex;
           flex-direction: column;
           align-items: center;
-          width: 100px;
+          width: 110px;
+          background: rgba(255, 255, 255, 0.92);
+          padding: 6px;
+          border-radius: 8px;
+          border: 1px solid rgba(102, 126, 234, 0.35);
+          box-shadow: 0 0 4px rgba(0, 0, 0, 0.08);
+          z-index: 2;
+        }
+
+        .cert-qr-box {
+          width: 100%;
+          max-width: 100%;
+          padding: 4px;
+          background: white;
+          border: 2px solid #ddd;
+          border-radius: 4px;
+          display: flex;
+          justify-content: center;
+          align-items: center;
+          overflow: hidden;
+        }
+
+        .cert-qr-box canvas,
+        .cert-qr-box img {
+          width: 100%;
+          height: auto;
+          display: block;
         }
 
         .cert-qr-label {
