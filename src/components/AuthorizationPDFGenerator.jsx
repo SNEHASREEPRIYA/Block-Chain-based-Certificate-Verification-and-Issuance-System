@@ -42,9 +42,9 @@ function AuthorizationPDFGenerator() {
 
         pdf.setFontSize(12);
         pdf.setTextColor(0, 0, 0);
-        pdf.text('Institution Name: ___________________________', 20, 185);
-        pdf.text('Authorization Date: _________________________', 20, 195);
-        pdf.text('Authorization ID: ___________________________', 20, 205);
+        pdf.text('Institution Name: ', 20, 185);
+        pdf.text('Authorization Date: ', 20, 195);
+        pdf.text('Authorization ID: ', 20, 205);
 
         // Signature section
         pdf.setFontSize(14);
