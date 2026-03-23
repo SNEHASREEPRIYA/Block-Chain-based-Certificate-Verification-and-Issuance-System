@@ -1,8 +1,8 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { ethers } from 'ethers';
 import QRCode from 'qrcode.react';
+import QRCodeLib from 'qrcode';
 import jsPDF from 'jspdf';
-import html2canvas from 'html2canvas';
 import WalletConnect from './WalletConnect';
 import { issueCertificateWithRecord } from '../utils/certificateContract';
 import './CertificateIssuance.css';
@@ -26,7 +26,7 @@ function CertificateIssuance() {
   const [qrValue, setQrValue] = useState('');
   const [currentAccount, setCurrentAccount] = useState('');
   const [registeredInstitution, setRegisteredInstitution] = useState(null);
-  const certificateRef = useRef();
+  const qrRef = useRef();
 
   // Check if current account is a registered institution
   useEffect(() => {
@@ -71,50 +71,145 @@ function CertificateIssuance() {
 
   const downloadCertificatePDF = async () => {
     try {
-      const element = certificateRef.current;
+      // Generate QR code dynamically
+      const generateQRImage = () => {
+        return new Promise((resolve) => {
+          const canvas = document.createElement('canvas');
+          QRCodeLib.toCanvas(canvas, issuanceResult.certificateId, { width: 100 }, (err) => {
+            if (err) {
+              console.error('QR Generation Error:', err);
+              resolve(null);
+            } else {
+              resolve(canvas.toDataURL('image/png'));
+            }
+          });
+        });
+      };
 
-      // Use higher scale for better quality
-      const canvas = await html2canvas(element, {
-        scale: 4,
-        useCORS: true,
-        backgroundColor: '#ffffff',
-        logging: false,
-        allowTaint: true
-      });
+      const qrImage = await generateQRImage();
 
-      const imgData = canvas.toDataURL('image/png');
-
-      // A4 landscape dimensions (297mm x 210mm)
       const pdf = new jsPDF({
         orientation: 'landscape',
         unit: 'mm',
         format: 'a4'
       });
 
-      const pageWidth = pdf.internal.pageSize.getWidth();   // 297mm
-      const pageHeight = pdf.internal.pageSize.getHeight();  // 210mm
+      const pageWidth = pdf.internal.pageSize.getWidth();
+      const pageHeight = pdf.internal.pageSize.getHeight();
 
-      // Calculate aspect ratio and size to fit on page
-      const imgAspectRatio = canvas.width / canvas.height;
-      let imgWidth = pageWidth - 15;  // Leave margins
-      let imgHeight = imgWidth / imgAspectRatio;
+      // Draw decorative borders
+      pdf.setDrawColor(102, 126, 234);
+      pdf.setLineWidth(1.5);
+      pdf.rect(10, 10, pageWidth - 20, pageHeight - 20);
+      pdf.setLineWidth(0.5);
+      pdf.rect(12, 12, pageWidth - 24, pageHeight - 24);
 
-      // If too tall, scale down by height
-      if (imgHeight > pageHeight - 10) {
-        imgHeight = pageHeight - 15;
-        imgWidth = imgHeight * imgAspectRatio;
+      // Title
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(36);
+      pdf.setTextColor(102, 126, 234);
+      pdf.text("CERTIFICATE OF ACHIEVEMENT", pageWidth / 2, 35, { align: "center" });
+
+      // Subtitle
+      pdf.setFontSize(12);
+      pdf.setFont("helvetica", "italic");
+      pdf.setTextColor(118, 75, 162);
+      pdf.text("Blockchain-Verified Credential", pageWidth / 2, 43, { align: "center" });
+
+      // Top-right Certificate ID in PDF
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(10);
+      pdf.setTextColor(45, 55, 72);
+      pdf.text(`Certificate ID: ${issuanceResult.certificateId}`, pageWidth - 15, 18, { align: "right" });
+
+      // Top decorative line
+      pdf.setDrawColor(200, 200, 200);
+      pdf.setLineWidth(0.3);
+      pdf.line(20, 56, pageWidth - 20, 56);
+
+      // Main text
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(13);
+      pdf.setTextColor(60, 60, 60);
+      pdf.text("This certifies that", pageWidth / 2, 68, { align: "center" });
+
+      // Student name
+      pdf.setFont("times", "bolditalic");
+      pdf.setFontSize(28);
+      pdf.setTextColor(45, 55, 72);
+      pdf.text(issuanceResult.metadata.studentName, pageWidth / 2, 82, { align: "center" });
+
+      // Course text
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(12);
+      pdf.setTextColor(60, 60, 60);
+      pdf.text("has successfully completed", pageWidth / 2, 92, { align: "center" });
+
+      // Course name
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(16);
+      pdf.setTextColor(45, 55, 72);
+      pdf.text(issuanceResult.metadata.courseProgram, pageWidth / 2, 102, { align: "center" });
+
+      // Grade
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(12);
+      pdf.setTextColor(60, 60, 60);
+      pdf.text("with a grade of", pageWidth / 2, 112, { align: "center" });
+
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(14);
+      pdf.setTextColor(40, 167, 69);
+      pdf.text(issuanceResult.metadata.grade, pageWidth / 2, 120, { align: "center" });
+
+      // Bottom decorative line
+      pdf.setDrawColor(200, 200, 200);
+      pdf.setLineWidth(0.3);
+      pdf.line(20, 127, pageWidth - 20, 127);
+
+      // Certificate details
+      pdf.setFont("courier", "bold");
+      pdf.setFontSize(12);
+      pdf.setTextColor(45, 55, 72);
+      const detailsX = 22;
+      let detailsY = 137;
+
+      pdf.text(`Institution: ${registeredInstitution?.name || issuanceResult.metadata.institutionName || 'Unknown'}`, detailsX, detailsY);
+      detailsY += 7;
+      pdf.text(`Student ID: ${issuanceResult.metadata.studentId}`, detailsX, detailsY);
+      detailsY += 7;
+      pdf.text(`Completion Date: ${issuanceResult.metadata.completionDate}`, detailsX, detailsY);
+      detailsY += 7;
+      pdf.text(`Expiry Date: ${issuanceResult.metadata.expiryDate}`, detailsX, detailsY);
+      detailsY += 7;
+      pdf.text(`Issue Date: ${issuanceResult.metadata.issueDate}`, detailsX, detailsY);
+
+      // Draw QR card at bottom right corner inside margin
+      if (qrImage) {
+        const qrCardWidth = 42;
+        const qrCardHeight = 52;
+        const qrCardX = pageWidth - qrCardWidth - 18; // deeper inside right margin
+        const qrCardY = pageHeight - qrCardHeight - 18; // deeper inside bottom margin
+
+        pdf.setDrawColor(200, 200, 255);
+        pdf.setFillColor(255, 255, 255);
+        pdf.setLineWidth(0.8);
+        pdf.roundedRect(qrCardX, qrCardY, qrCardWidth, qrCardHeight, 2, 2, 'S');
+
+        const qrSize = 38;
+        const qrX = qrCardX + (qrCardWidth - qrSize) / 2;
+        const qrY = qrCardY + 7;
+        pdf.addImage(qrImage, 'PNG', qrX, qrY, qrSize, qrSize);
+
+        pdf.setFont("helvetica", "normal");
+        pdf.setFontSize(8);
+        pdf.setTextColor(30, 30, 30);
+        pdf.text("Verify to scan", qrCardX + qrCardWidth / 2, qrCardY + qrCardHeight - 4, { align: "center" });
       }
 
-      // Center on page
-      const xPos = (pageWidth - imgWidth) / 2;
-      const yPos = (pageHeight - imgHeight) / 2;
-
-      pdf.addImage(imgData, 'PNG', xPos, yPos, imgWidth, imgHeight);
-
-      // Add hidden payload to PDF for robust upload-based verification
+      // Add hidden payload
       if (issuanceResult?.certificatePayload) {
         const payloadText = `CERT_PAYLOAD:${JSON.stringify(issuanceResult.certificatePayload)}`;
-        // Put small, near-invisible text in the bottom margin so human-readable layout isn't affected.
         pdf.setFontSize(1);
         pdf.setTextColor(255, 255, 255);
         pdf.text(payloadText, 5, pageHeight - 3);
@@ -122,7 +217,8 @@ function CertificateIssuance() {
 
       pdf.save(`Certificate-${issuanceResult.certificateId}.pdf`);
     } catch (err) {
-      alert('Failed to download certificate: ' + err.message);
+      console.error("PDF Generation Failed:", err);
+      alert("Error generating PDF. Please try again.");
     }
   };
 
@@ -397,94 +493,10 @@ function CertificateIssuance() {
         </form>
       ) : (
         <div className="result-container">
-          <div ref={certificateRef} className="certificate-content">
-            {/* Professional Certificate Template */}
-            <div className="certificate-template">
-              <div className="cert-unique-id-badge">ID: {issuanceResult.certificateId}</div>
-              {/* Header */}
-              <div className="cert-header">
-                <div className="cert-logo">🎓</div>
-                <h1 className="cert-title">CERTIFICATE OF ACHIEVEMENT</h1>
-                <p className="cert-subtitle">Blockchain-Verified Credential</p>
-              </div>
-
-              {/* Border decoration */}
-              <div className="cert-border-top"></div>
-
-              {/* Main Content */}
-              <div className="cert-body">
-                <p className="cert-intro">This certifies that</p>
-                <h2 className="cert-recipient">{issuanceResult.metadata.studentName}</h2>
-                <p className="cert-middle">has successfully completed</p>
-                <p className="cert-course">{issuanceResult.metadata.courseProgram}</p>
-                <p className="cert-middle">with a grade of</p>
-                <p className="cert-grade">{issuanceResult.metadata.grade}</p>
-
-                {/* Footer border */}
-                <div className="cert-border-bottom"></div>
-
-                {/* Details Table */}
-                <div className="cert-details">
-                  <div className="cert-detail-row">
-                    <span className="cert-detail-label">Certificate ID:</span>
-                    <span className="cert-detail-value">{issuanceResult.certificateId}</span>
-                  </div>
-                  <div className="cert-detail-row">
-                    <span className="cert-detail-label">Institution Name:</span>
-                    <span className="cert-detail-value">{issuanceResult.metadata.institutionName || registeredInstitution?.name || 'Unknown'}</span>
-                  </div>
-                  <div className="cert-detail-row">
-                    <span className="cert-detail-label">Institution Address:</span>
-                    <span className="cert-detail-value">{registeredInstitution?.address || issuanceResult.metadata.institutionAddress || 'Unknown'}</span>
-                  </div>
-                  <div className="cert-detail-row">
-                    <span className="cert-detail-label">Student Address:</span>
-                    <span className="cert-detail-value">{issuanceResult.metadata.studentAddress}</span>
-                  </div>
-                  <div className="cert-detail-row">
-                    <span className="cert-detail-label">Student ID:</span>
-                    <span className="cert-detail-value">{issuanceResult.metadata.studentId}</span>
-                  </div>
-                  <div className="cert-detail-row">
-                    <span className="cert-detail-label">Completion Date:</span>
-                    <span className="cert-detail-value">{issuanceResult.metadata.completionDate}</span>
-                  </div>
-                  <div className="cert-detail-row">
-                    <span className="cert-detail-label">Expiry Date:</span>
-                    <span className="cert-detail-value">{issuanceResult.metadata.expiryDate}</span>
-                  </div>
-                  <div className="cert-detail-row">
-                    <span className="cert-detail-label">Issue Date:</span>
-                    <span className="cert-detail-value">{issuanceResult.metadata.issueDate}</span>
-                  </div>
-                  <div className="cert-detail-row">
-                    <span className="cert-detail-label">Blockchain Verified:</span>
-                    <span className="cert-detail-value">✅ Yes</span>
-                  </div>
-                </div>
-
-                {/* QR Code */}
-                <div className="cert-qr-section">
-                  <p className="cert-qr-label">Verify</p>
-                  <div className="cert-qr-box">
-                    <QRCode
-                      value={qrValue}
-                      size={100}
-                      level="M"
-                      includeMargin={false}
-                      renderAs="svg"
-                    />
-                  </div>
-                  <p className="cert-qr-hint">Scan</p>
-                </div>
-              </div>
-
-              {/* Signature area */}
-              <div className="cert-signature">
-                <p className="signature-line">_________________</p>
-                <p className="signature-label">Authorized Issuer</p>
-              </div>
-            </div>
+          <div className="success-message">
+            <div className="success-icon">✅</div>
+            <h2 className="success-title">Certificate Issued Successfully!</h2>
+            <p className="success-text">Certificate is issued with ID <span className="cert-id">{issuanceResult.certificateId}</span></p>
           </div>
 
           <div className="action-buttons">
@@ -496,6 +508,18 @@ function CertificateIssuance() {
               onClick={() => {
                 setIssuanceResult(null);
                 setQrValue('');
+                // Reset form
+                setFormData({
+                  certificateId: '',
+                  studentName: '',
+                  studentId: '',
+                  courseProgram: '',
+                  grade: '',
+                  completionDate: '',
+                  institutionAddress: '',
+                  studentAddress: '',
+                  expiryDate: ''
+                });
               }}
             >
               🔄 Issue Another Certificate
@@ -603,6 +627,56 @@ function CertificateIssuance() {
 
         .result-container {
           text-align: center;
+          padding: 3rem 2rem;
+          background: white;
+          border-radius: 12px;
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+          max-width: 600px;
+          margin: 2rem auto;
+        }
+
+        .success-message {
+          margin-bottom: 2rem;
+        }
+
+        .success-icon {
+          font-size: 3rem;
+          margin-bottom: 1rem;
+          animation: scaleIn 0.5s ease-out;
+        }
+
+        @keyframes scaleIn {
+          from {
+            transform: scale(0);
+            opacity: 0;
+          }
+          to {
+            transform: scale(1);
+            opacity: 1;
+          }
+        }
+
+        .success-title {
+          font-size: 1.8rem;
+          color: #28a745;
+          margin-bottom: 1rem;
+          font-weight: 700;
+        }
+
+        .success-text {
+          font-size: 1.1rem;
+          color: #666;
+          margin-bottom: 0.5rem;
+        }
+
+        .cert-id {
+          font-weight: 700;
+          color: #667eea;
+          font-family: monospace;
+          font-size: 1.2rem;
+          padding: 0.25rem 0.5rem;
+          background: #f0f2ff;
+          border-radius: 4px;
         }
 
         .qr-container {
@@ -834,31 +908,45 @@ function CertificateIssuance() {
 
         .cert-qr-section {
           position: absolute;
-          bottom: 16px;
-          right: 16px;
+          bottom: 40px;
+          right: 20px;
           display: flex;
           flex-direction: column;
           align-items: center;
-          width: 110px;
-          background: rgba(255, 255, 255, 0.92);
-          padding: 6px;
+          width: 130px;
+          background: rgba(255, 255, 255, 0.97);
+          padding: 12px;
           border-radius: 8px;
-          border: 1px solid rgba(102, 126, 234, 0.35);
-          box-shadow: 0 0 4px rgba(0, 0, 0, 0.08);
+          border: 2px solid #667eea;
+          box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
           z-index: 2;
+        }
+
+        .cert-qr-label {
+          font-size: 10px;
+          font-weight: 600;
+          color: #667eea;
+          margin-bottom: 6px;
         }
 
         .cert-qr-box {
           width: 100%;
           max-width: 100%;
-          padding: 4px;
+          padding: 6px;
           background: white;
-          border: 2px solid #ddd;
-          border-radius: 4px;
+          border: 2px solid #667eea;
+          border-radius: 6px;
           display: flex;
           justify-content: center;
           align-items: center;
           overflow: hidden;
+        }
+
+        .cert-qr-hint {
+          font-size: 10px;
+          color: #667eea;
+          margin-top: 6px;
+          font-weight: 600;
         }
 
         .cert-qr-box canvas,
