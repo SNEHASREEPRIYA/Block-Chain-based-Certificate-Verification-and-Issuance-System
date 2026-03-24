@@ -14,6 +14,47 @@ const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
  * @param {number} expiryDate The expiry date as timestamp
  * @returns {string} The Keccak256 hash as hex string
  */
+const parseExpiryTimestamp = (expiryDate) => {
+    if (expiryDate === null || expiryDate === undefined || expiryDate === '') {
+        return 0;
+    }
+
+    if (typeof expiryDate === 'number' && Number.isFinite(expiryDate)) {
+        return Math.floor(expiryDate);
+    }
+
+    if (typeof expiryDate === 'bigint') {
+        return expiryDate;
+    }
+
+    const numeric = Number(expiryDate);
+    if (!Number.isNaN(numeric) && Number.isFinite(numeric)) {
+        return Math.floor(numeric);
+    }
+
+    // Accept common date string formats
+    let parsed = Date.parse(expiryDate);
+    if (!Number.isNaN(parsed)) {
+        return Math.floor(parsed / 1000);
+    }
+
+    // Support dd/mm/yyyy or dd-mm-yyyy optionally with time
+    const fallback = expiryDate.toString().trim().match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{4})(?:[ ,](\d{1,2}:\d{2}(?::\d{2})?))?$/);
+    if (fallback) {
+        const day = parseInt(fallback[1], 10);
+        const month = parseInt(fallback[2], 10) - 1;
+        const year = parseInt(fallback[3], 10);
+        const timePart = fallback[4] || '00:00:00';
+        const [hour, minute, second] = timePart.split(':').map((x) => parseInt(x, 10));
+        const dateObj = new Date(year, month, day, hour || 0, minute || 0, second || 0);
+        if (!Number.isNaN(dateObj.getTime())) {
+            return Math.floor(dateObj.getTime() / 1000);
+        }
+    }
+
+    return 0;
+};
+
 export const computeKeccak256Hash = (
     certificateId,
     studentAddress,
@@ -24,7 +65,8 @@ export const computeKeccak256Hash = (
 ) => {
     try {
         // Convert expiryDate to BigInt for proper encoding
-        const expiryDateBigInt = BigInt(expiryDate || 0);
+        const parsedExpiry = parseExpiryTimestamp(expiryDate);
+        const expiryDateBigInt = BigInt(parsedExpiry || 0);
 
         // Use ethers.solidityPacked to encode exactly like Solidity's abi.encodePacked
         const packed = ethers.solidityPacked(

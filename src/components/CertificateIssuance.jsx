@@ -313,6 +313,7 @@ function CertificateIssuance() {
       // Embed the full canonical payload for hashing and verification
       const currentTimestamp = Math.floor(Date.now() / 1000);
       const issueDateFormatted = new Date().toLocaleString();
+      const expiryDateFormatted = new Date(formData.expiryDate).toLocaleString();
       const certificatePayload = {
         certificateId: formData.certificateId,
         studentAddress: formData.studentAddress,
@@ -334,7 +335,8 @@ function CertificateIssuance() {
         hash: 'Certificate issued successfully',
         metadata: {
           ...formData,
-          issueDate: issueDateFormatted
+          issueDate: issueDateFormatted,
+          expiryDate: expiryDateFormatted
         },
         qrData: qrData,
         certificatePayload: certificatePayload,

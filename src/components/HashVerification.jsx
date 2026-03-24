@@ -52,6 +52,12 @@ function HashVerification() {
   const [camerPermissionError, setCameraPermissionError] = useState('');
   const [activeModule, setActiveModule] = useState('id');
 
+  // New states for PDF fallback certificate ID and blockchain verification
+  const [pdfCertificateIdInput, setPdfCertificateIdInput] = useState('');
+  const [pdfPayloadMissing, setPdfPayloadMissing] = useState(false);
+  const [pdfBlockchainData, setPdfBlockchainData] = useState(null);
+  const [tamperingDetected, setTamperingDetected] = useState(false);
+
   const extractCertificatePayloadFromText = (text) => {
     if (!text) return null;
 
@@ -65,6 +71,139 @@ function HashVerification() {
       console.error('Failed to parse certificate payload from PDF text', err);
       return null;
     }
+  };
+
+  const extractFieldFromText = (text, fieldName) => {
+    if (!text || !fieldName) return null;
+    const regex = new RegExp(`(?:${fieldName})\\s*[:\\-]?\\s*([^\\n\\r]+)`, 'i');
+    const match = text.match(regex);
+    if (!match) return null;
+    return match[1].trim();
+  };
+
+  const normalizeValue = (value) => {
+    if (value === null || value === undefined) return '';
+    return value.toString().trim();
+  };
+
+  const extractCertificateInfoFromPDFText = (text) => {
+    if (!text) return null;
+
+    let certificateId = extractFieldFromText(text, 'Certificate ID') || extractFieldFromText(text, 'ID');
+    if (certificateId) {
+      certificateId = certificateId.split(/\s+/)[0];
+    }
+    const institutionName = normalizeValue(extractFieldFromText(text, 'Institution'));
+    const studentId = normalizeValue(extractFieldFromText(text, 'Student ID'));
+
+    // Extract dates - look for lines with "Issue Date:" and "Expiry Date:"
+    let issueDate = null;
+    let expiryDate = null;
+
+    // Try to find Issue Date and Expiry Date from the text
+    const issueDateMatch = text.match(/Issue\s+Date:\s*([^\n]+)/i);
+    if (issueDateMatch) {
+      issueDate = normalizeValue(issueDateMatch[1]);
+    }
+
+    const expiryDateMatch = text.match(/Expiry\s+Date:\s*([^\n]+)/i);
+    if (expiryDateMatch) {
+      expiryDate = normalizeValue(expiryDateMatch[1]);
+    }
+
+    // Convert dates to timestamps for hashing
+    const parseDate = (dateStr) => {
+      if (!dateStr || dateStr === '' || dateStr === 'N/A') return null;
+      try {
+        // Parse date string to timestamp
+        const date = new Date(dateStr);
+        if (!isNaN(date.getTime())) {
+          return Math.floor(date.getTime() / 1000);
+        }
+      } catch (e) {
+        console.error('Date parsing error for:', dateStr, e);
+      }
+      return null;
+    };
+
+    const studentNameMatch = text.match(/This certifies that\s+([\w\s.\-]+?)\s+has successfully completed/i);
+    const studentName = studentNameMatch ? studentNameMatch[1].trim() : null;
+
+    const courseMatch = text.match(/has successfully completed\s+([\w\s.&,-]+?)\s+with a grade/i);
+    const courseName = courseMatch ? courseMatch[1].trim() : null;
+
+    // FIXED: Use \S+ to match only the grade (not following words). Stop at first whitespace.
+    const gradeMatch = text.match(/with a grade(?: of)?\s+(\S+)/i);
+    const grade = gradeMatch ? gradeMatch[1].trim() : null;
+
+    console.log('📋 Extracted from PDF text:', {
+      issueDate,
+      expiryDate,
+      grade,
+      courseName,
+      certificateId,
+      institutionName
+    });
+
+    return {
+      certificateId,
+      studentName,
+      studentId,
+      institutionName,
+      courseName,
+      grade,
+      issueDate: issueDate || 'N/A',
+      expiryDate: expiryDate || 'N/A',
+      issueDate_raw: parseDate(issueDate),
+      expiryDate_raw: parseDate(expiryDate),
+      studentAddress: null
+    };
+  };
+
+  // Helper function to check if certificate data was tampered
+  const checkForTampering = (blockchainData, uploadedData) => {
+    if (!blockchainData || !uploadedData) return false;
+
+    const fieldMismatch = (uploaded, chain) => {
+      if (!uploaded || !chain) return false;
+      return uploaded.toString().trim().toLowerCase() !== chain.toString().trim().toLowerCase();
+    };
+
+    const prominenceTamper = fieldMismatch(uploadedData.courseName, blockchainData.courseName)
+      || fieldMismatch(uploadedData.grade, blockchainData.grade)
+      || fieldMismatch(uploadedData.institutionName, blockchainData.institutionName)
+      || fieldMismatch(uploadedData.studentAddress, blockchainData.studentAddress);
+
+    const parseDate = (value) => {
+      if (!value && value !== 0) return null;
+      const asNum = Number(value);
+      if (!Number.isNaN(asNum) && asNum > 0) return asNum;
+      const dt = new Date(value);
+      if (!Number.isNaN(dt.getTime())) return Math.floor(dt.getTime() / 1000);
+      return null;
+    };
+
+    const chainExpiry = parseDate(blockchainData.expiryDate);
+    const uploadedExpiry = parseDate(uploadedData.expiryDate);
+
+    const expiryTamper = chainExpiry && uploadedExpiry ? Math.abs(chainExpiry - uploadedExpiry) > 86400 : false;
+
+    return prominenceTamper || expiryTamper;
+  };
+
+  // Transform blockchain data into comparable certificate object
+  const constructBlockchainCertificateData = (verifyResult) => {
+    if (!verifyResult || !verifyResult.certificate) return null;
+
+    return {
+      certificateId: verifyResult.certificate.certificateId,
+      studentAddress: verifyResult.certificate.studentAddress,
+      institutionName: verifyResult.certificate.institutionName,
+      courseName: verifyResult.certificate.courseName,
+      grade: verifyResult.certificate.grade,
+      expiryDate: verifyResult.certificate.expiryDate_raw || verifyResult.certificate.expiryDate,
+      issueDate: verifyResult.certificate.issueDate_raw || verifyResult.certificate.issueDate,
+    };
   };
 
   const formatDateValue = (value, rawSeconds = null) => {
@@ -409,6 +548,8 @@ function HashVerification() {
     setPdfUploadError('');
     setPdfParsingResult(null);
     setUploadedCertificateData(null);
+    setPdfPayloadMissing(false);
+    setPdfCertificateIdInput('');
 
     if (!file) {
       return;
@@ -427,27 +568,40 @@ function HashVerification() {
       const pdf = await loadingTask.promise;
       const page = await pdf.getPage(1);
       const content = await page.getTextContent();
-      const text = content.items.map(w => w.str).join(' ');
+      // Preserve text line breaks if possible for better regex matching
+      const text = content.items.map(w => w.str).join('\n');
 
       const payload = extractCertificatePayloadFromText(text);
+      let certificateInfo = payload;
+
       if (!payload) {
-        throw new Error('CERT_PAYLOAD entry not found in PDF. Please use the certificate PDF downloaded from this app.');
+        console.warn('CERT_PAYLOAD not found in PDF - attempting visible text extraction.');
+        const visibleData = extractCertificateInfoFromPDFText(text);
+
+        if (!visibleData || !visibleData.certificateId) {
+          setPdfPayloadMissing(true);
+          setPdfUploadError('Certificate metadata not found in PDF. This may be a converted or modified PDF. Please enter the Certificate ID manually below to verify it against the blockchain.');
+          setLoading(false);
+          return;
+        }
+
+        certificateInfo = visibleData;
       }
 
-      setUploadedCertificateData(payload);
+      setPdfPayloadMissing(false);
+      setPdfUploadError('');
+      setUploadedCertificateData(certificateInfo);
 
-      // PDF upload parsed successfully; do not verify automatically
-      setUploadedCertificateData(payload);
       setPdfParsingResult({
         status: 'parsed',
-        certificateId: payload.certificateId,
-        extractedData: payload,
+        certificateId: certificateInfo.certificateId,
+        extractedData: certificateInfo,
         verifyResult: null,
         integrityResult: null,
         isValid: null
       });
 
-      setCertificateId(payload.certificateId);
+      setCertificateId(certificateInfo.certificateId);
     } catch (err) {
       setPdfUploadError(err.message || 'Failed to parse PDF certificate');
       console.error('PDF upload error:', err);
@@ -457,64 +611,119 @@ function HashVerification() {
   };
 
   const verifyUploadedPDF = async () => {
-    if (!uploadedCertificateData) {
-      setPdfUploadError('Please upload a certificate PDF first.');
+    if (!uploadedCertificateData && !pdfCertificateIdInput.trim()) {
+      setPdfUploadError('Please upload a certificate PDF or enter a Certificate ID to verify.');
       return;
     }
 
     setLoading(true);
     setPdfVerifyError('');
+    setPdfUploadError('');
     setUploadedCertificateVerification(null);
 
-    try {
-      // Step 1: confirm certificate exists on chain
-      const verifyResult = await verifyCertificate(uploadedCertificateData.certificateId);
+    const certificateIdToVerify = uploadedCertificateData?.certificateId || pdfCertificateIdInput.trim();
+    if (!certificateIdToVerify) {
+      setPdfUploadError('Certificate ID is missing. Please provide a valid Certificate ID.');
+      setLoading(false);
+      return;
+    }
 
-      // Step 2: get stored chain hash (explicit call)
+    try {
+      const verifyResult = await verifyCertificate(certificateIdToVerify);
+
+      if (!verifyResult || !verifyResult.certificate || !verifyResult.isValid) {
+        setPdfVerifyError('❌ Certificate ID not found. Please verify the Certificate ID.');
+        setUploadedCertificateVerification({
+          verifyResult,
+          integrityResult: null,
+          chainStoredHash: null,
+          computedHash: null,
+          isValid: false
+        });
+        setPdfParsingResult((prev) => ({
+          ...prev,
+          status: 'verified',
+          verifyResult,
+          integrityResult: null,
+          isValid: false,
+          computedHash: null,
+          chainStoredHash: null
+        }));
+        setLoading(false);
+        return;
+      }
+
       let chainStoredHash = null;
       try {
-        chainStoredHash = await getCertificateHashFromContract(uploadedCertificateData.certificateId);
+        chainStoredHash = await getCertificateHashFromContract(certificateIdToVerify);
       } catch (chainErr) {
         console.warn('Chain hash fetch failed:', chainErr.message);
-        // Try to use verifyCertificate result if available (it includes certificateHash with signed value)
-        chainStoredHash = verifyResult?.certificate?.certificateHash || null;
       }
 
-      // Step 3: recompute hash from parsed payload
-      const computedHash = hashCertificateData(uploadedCertificateData);
-
-      // Step 4: compute integrity using enhanced helper (for logging + fallback checks)
-      const integrityResult = await verifyCertificateIntegrityEnhanced(uploadedCertificateData.certificateId, uploadedCertificateData);
-
-      // If explicit getCertificateHash call fails, try fallback from verifyResult certificate record
-      if (!chainStoredHash && verifyResult?.certificate?.certificateHash) {
-        chainStoredHash = verifyResult.certificate.certificateHash;
+      if (!chainStoredHash) {
+        chainStoredHash = verifyResult.certificate?.certificateHash || null;
       }
 
-      const isValid = verifyResult.isValid && Boolean(chainStoredHash) && computedHash.toLowerCase() === String(chainStoredHash).toLowerCase();
+      // Build payload for hash computing using extracted PDF fields where available
+      const parseExpiry = (input) => {
+        if (!input && input !== 0) return null;
+        const asNum = Number(input);
+        if (!Number.isNaN(asNum) && asNum > 0) return asNum;
+        const dt = new Date(input);
+        if (!Number.isNaN(dt.getTime())) return Math.floor(dt.getTime() / 1000);
+        return null;
+      };
+
+      // Use expiryDate_raw if available (Unix timestamp from extraction), otherwise parse expiryDate
+      const expiryDateForHash = uploadedCertificateData?.expiryDate_raw || parseExpiry(uploadedCertificateData?.expiryDate) || verifyResult.certificate.expiryDate_raw || verifyResult.certificate.expiryDate;
+
+      const payloadForHash = {
+        certificateId: certificateIdToVerify,
+        studentAddress: uploadedCertificateData?.studentAddress || verifyResult.certificate.studentAddress,
+        institutionName: uploadedCertificateData?.institutionName || verifyResult.certificate.institutionName,
+        courseName: uploadedCertificateData?.courseName || verifyResult.certificate.courseName,
+        grade: uploadedCertificateData?.grade || verifyResult.certificate.grade,
+        expiryDate: expiryDateForHash
+      };
+
+      console.log('🔐 Hash Payload from PDF verification:', payloadForHash);
+      const computedHash = hashCertificateData(payloadForHash);
+
+      const chainData = constructBlockchainCertificateData(verifyResult);
+      const pdfData = uploadedCertificateData || {};
+
+      // if uploaded data has fields available, compare with chain data for tamper detection
+      const isTampering = pdfData && pdfData.certificateId ? checkForTampering(chainData, pdfData) : false;
+
+      const isValid = !!verifyResult.isValid && !!chainStoredHash && computedHash.toLowerCase() === String(chainStoredHash).toLowerCase() && !isTampering;
 
       setUploadedCertificateVerification({
         verifyResult,
         computedHash,
         chainStoredHash,
-        integrityResult,
-        isValid
+        integrityResult: null,
+        isValid,
+        fromBlockchain: true,
+        tamperingDetected: isTampering
       });
 
       setPdfParsingResult((prev) => ({
         ...prev,
         status: 'verified',
         verifyResult,
-        integrityResult,
+        integrityResult: null,
         isValid,
         computedHash,
-        chainStoredHash
+        chainStoredHash,
+        tamperingDetected: isTampering
       }));
 
       if (!chainStoredHash) {
         setPdfVerifyError('Chain hash not found. Ensure that the certificate was issued on-chain and you are connected to the correct network.');
       } else if (computedHash.toLowerCase() !== String(chainStoredHash).toLowerCase()) {
-        setPdfVerifyError('Computed hash does not match stored chain hash. Certificate may be tampered.');
+        setPdfVerifyError('Hash mismatch. Certificate may be tampered.');
+      } else if (isTampering) {
+        setPdfVerifyError('❌ Certificate is tampered and it is invalid.');
       } else {
         setPdfVerifyError('');
       }
@@ -529,6 +738,19 @@ function HashVerification() {
     } finally {
       setLoading(false);
     }
+  };
+
+  // New function to verify manually entered certificate ID and detect tampering
+  const verifyManualCertificateId = async () => {
+    if (!pdfCertificateIdInput.trim()) {
+      setPdfUploadError('Please enter a Certificate ID');
+      return;
+    }
+
+    setPdfUploadError('');
+    setPdfVerifyError('');
+    setUploadedCertificateData({ certificateId: pdfCertificateIdInput.trim() });
+    await verifyUploadedPDF();
   };
 
   const clearQRState = () => {
@@ -557,6 +779,10 @@ function HashVerification() {
     setPdfParsingResult(null);
     setPdfUploadError('');
     setPdfVerifyError('');
+    setPdfPayloadMissing(false);
+    setPdfCertificateIdInput('');
+    setPdfBlockchainData(null);
+    setTamperingDetected(false);
   };
 
   // Switch module and clear all previous results/errors
@@ -767,6 +993,37 @@ function HashVerification() {
             {pdfUploadError && <div className="alert error">❌ {pdfUploadError}</div>}
             {pdfVerifyError && <div className="alert error">❌ {pdfVerifyError}</div>}
 
+            {pdfPayloadMissing && (
+              <div className="fallback-id-section" style={{ marginTop: '1.5rem', padding: '1rem', border: '2px solid #ff9800', borderRadius: '8px', backgroundColor: '#fff3e0' }}>
+                <h4 style={{ marginTop: 0, color: '#e65100' }}>🔍 Certificate Metadata Not Found</h4>
+                <p style={{ marginBottom: '1rem', color: '#555' }}>
+                  The PDF appears to have been converted or modified. We'll verify it against the blockchain using the Certificate ID.
+                </p>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold', color: '#333' }}>📋 Enter Certificate ID:</label>
+                <div className="input-group" style={{ display: 'flex', gap: '0.5rem', marginBottom: '1rem' }}>
+                  <input
+                    type="text"
+                    placeholder="e.g., CERT-2024-001"
+                    value={pdfCertificateIdInput}
+                    onChange={(e) => setPdfCertificateIdInput(e.target.value)}
+                    onKeyPress={(e) => e.key === 'Enter' && verifyManualCertificateId()}
+                    style={{ flex: 1, padding: '0.75rem', borderRadius: '4px', border: '1px solid #ddd', fontSize: '1rem' }}
+                  />
+                  <button
+                    onClick={verifyManualCertificateId}
+                    disabled={loading || !pdfCertificateIdInput.trim()}
+                    className="verify-btn"
+                    style={{ whiteSpace: 'nowrap' }}
+                  >
+                    {loading ? '⏳ Verifying...' : '✅ Verify'}
+                  </button>
+                </div>
+                <p style={{ fontSize: '0.9rem', color: '#666', marginBottom: 0 }}>
+                  💡 <strong>Tip:</strong> The Certificate ID can be found in the top-right corner of your certificate or in your email confirmation.
+                </p>
+              </div>
+            )}
+
             {pdfParsingResult?.status === 'parsed' && (
               <div className="info-box">✅ PDF parsed successfully. Click ‘Verify Uploaded PDF’ to confirm chain hash integrity.</div>
             )}
@@ -774,7 +1031,7 @@ function HashVerification() {
             {pdfParsingResult?.status === 'verified' && (
               <div className={`result-section ${(uploadedCertificateVerification?.isValid ?? false) ? 'valid' : 'invalid'}`}>
                 <div className="result-header">
-                  <h3>{(uploadedCertificateVerification?.isValid ?? false) ? '✅ PDF MATCH: AUTHENTIC' : '❌ PDF TAMPERED / INVALID'}</h3>
+                  <h3>{(uploadedCertificateVerification?.isValid ?? false) ? '✅ PDF MATCH: AUTHENTIC' : '❌ Certificate Details are Changed. Certificate is Tampered.'}</h3>
                   <p className="verification-time">Checked at: {new Date().toLocaleString()}</p>
                 </div>
                 <div className="hash-values">
@@ -792,7 +1049,7 @@ function HashVerification() {
                   </div>
                 </div>
                 <p className={`status-badge ${(uploadedCertificateVerification?.isValid ?? false) ? 'valid' : 'invalid'}`}>
-                  {uploadedCertificateVerification?.isValid ? 'The certificate is valid and untampered.' : 'Tampering detected or invalid certificate.'}
+                  {uploadedCertificateVerification?.isValid ? 'The certificate is valid and untampered.' : '❌ Certificate Details are Changed. Certificate is Tampered.'}
                 </p>
               </div>
             )}
