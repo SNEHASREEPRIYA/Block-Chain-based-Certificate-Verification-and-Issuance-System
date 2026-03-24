@@ -393,14 +393,14 @@ function StudentCertificates() {
           )}
         </div>
 
-        <div className="auth-requirements">
+        {/* <div className="auth-requirements">
           <h4>📋 Authorization PDF Requirements:</h4>
           <ul>
             <li>✅ Must contain exact phrase: "authorised!! Eligible to get certificate"</li>
             <li>✅ Must contain student name and ID (matching blockchain records)</li>
             <li>✅ Student must have at least one issued certificate on record</li>
           </ul>
-        </div>
+        </div> */}
       </div>
 
       <div className="search-section">
