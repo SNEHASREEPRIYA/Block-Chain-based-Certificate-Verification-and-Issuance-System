@@ -293,42 +293,56 @@ function StudentCertificates() {
         format: 'a4'
       });
 
+      // Draw border around the entire page
+      pdf.setDrawColor(0, 0, 0);   // Border color (black)
+      pdf.setLineWidth(1);         // Border thickness
+      pdf.rect(10, 10, 277, 190);
+
       // Certificate content
       pdf.setFontSize(24);
-      pdf.setTextColor(102, 126, 234); // Blue color
+      pdf.setTextColor(75, 128, 175); // Blue color
       pdf.text('CERTIFICATE OF COMPLETION', 148.5, 30, { align: 'center' });
+      // pdf.setDrawColor(102, 128, 234); // same color as heading
+      // pdf.setLineWidth(0.3);           // thickness of underline
+      // pdf.line(30, 148.5, 150, 148.5);
 
-      pdf.setFontSize(16);
+      pdf.setFontSize(18);
       pdf.setTextColor(0, 0, 0);
       pdf.text('This is to certify that', 148.5, 50, { align: 'center' });
 
       pdf.setFontSize(20);
-      pdf.setTextColor(102, 126, 234);
-      pdf.text(certData.studentName || 'Student', 148.5, 65, { align: 'center' });
-
-      pdf.setFontSize(16);
-      pdf.setTextColor(0, 0, 0);
-      pdf.text('has successfully completed the course', 148.5, 85, { align: 'center' });
+      pdf.setTextColor(75, 128, 175);
+      pdf.text(certData.studentName || 'Student', 148.5, 63, { align: 'center' });
 
       pdf.setFontSize(18);
-      pdf.setTextColor(102, 126, 234);
-      pdf.text(certData.courseProgram || 'Course', 148.5, 100, { align: 'center' });
-
-      pdf.setFontSize(16);
       pdf.setTextColor(0, 0, 0);
-      pdf.text(`with grade: ${certData.grade || 'N/A'}`, 148.5, 115, { align: 'center' });
+      pdf.text('has successfully completed the course', 148.5, 75, { align: 'center' });
+
+      pdf.setFontSize(20);
+      pdf.setTextColor(75, 128, 175);
+      pdf.text(certData.courseProgram || 'Course', 148.5, 87, { align: 'center' });
+
+      pdf.setFontSize(18);
+      pdf.setTextColor(0, 0, 0);
+      pdf.text('with grade: ', 148.5, 99, { align: 'center' });
+
+      pdf.setFontSize(20);
+      pdf.setTextColor(75, 128, 175);
+      pdf.text(certData.grade || 'N/A', 148.5, 113, { align: 'center' });
+
 
       pdf.setFontSize(14);
-      pdf.text(`Certificate ID: ${certificateId}`, 148.5, 135, { align: 'center' });
-      pdf.text(`Institution: ${certData.institutionName || 'Institution'}`, 148.5, 145, { align: 'center' });
-      pdf.text(`Issue Date: ${certData.issueDate || 'N/A'}`, 148.5, 155, { align: 'center' });
-      pdf.text(`Expiry Date: ${certData.expiryDate || 'N/A'}`, 148.5, 165, { align: 'center' });
+      pdf.setTextColor(0, 0, 0);
+      pdf.text(`Certificate ID: ${certificateId}`, 148.5, 132, { align: 'center' });
+      pdf.text(`Institution: ${certData.institutionName || 'Institution'}`, 148.5, 142, { align: 'center' });
+      pdf.text(`Issue Date: ${certData.issueDate || 'N/A'}`, 148.5, 152, { align: 'center' });
+      pdf.text(`Expiry Date: ${certData.expiryDate || 'N/A'}`, 148.5, 162, { align: 'center' });
 
       // Add authorization signature in green
       pdf.setTextColor(0, 128, 0); // Green color
       pdf.setFontSize(12);
-      pdf.text('AUTHORIZED BY INSTITUTION', 148.5, 185, { align: 'center' });
-      pdf.text('DIGITAL SIGNATURE VERIFIED', 148.5, 195, { align: 'center' });
+      pdf.text('AUTHORIZED BY INSTITUTION', 148.5, 180, { align: 'center' });
+      pdf.text('DIGITAL SIGNATURE VERIFIED', 148.5, 190, { align: 'center' });
 
       pdf.save(`Certificate-${certificateId}.pdf`);
     } catch (err) {
