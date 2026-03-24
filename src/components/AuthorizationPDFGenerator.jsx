@@ -9,6 +9,11 @@ function AuthorizationPDFGenerator() {
             format: 'a4'
         });
 
+        // Draw border around the entire page
+        pdf.setDrawColor(0, 0, 0);   // Border color (black)
+        pdf.setLineWidth(1);         // Border thickness
+        pdf.rect(10, 10, 190, 277);
+
         // Title
         pdf.setFontSize(20);
         pdf.setTextColor(102, 126, 234);
@@ -17,49 +22,90 @@ function AuthorizationPDFGenerator() {
         // Required content for validation
         pdf.setFontSize(14);
         pdf.setTextColor(0, 0, 0);
-        pdf.text('AUTHORIZED BY INSTITUTION', 105, 50, { align: 'center' });
+        pdf.text('AUTHORIZED BY INSTITUTION', 105, 45, { align: 'center' });
 
         pdf.setFontSize(12);
-        pdf.text('PERMISSION GRANTED', 105, 70, { align: 'center' });
-        pdf.text('STUDENT CERTIFICATE ACCESS', 105, 85, { align: 'center' });
+        pdf.text('PERMISSION GRANTED', 105, 55, { align: 'center' });
+        pdf.text('STUDENT CERTIFICATE ACCESS', 105, 65, { align: 'center' });
 
         // Student Information Section (to be filled by student)
         pdf.setFontSize(16);
         pdf.setTextColor(102, 126, 234);
-        pdf.text('Student Information:', 20, 110);
+        pdf.text('Student Information:', 20, 90);
 
         pdf.setFontSize(12);
         pdf.setTextColor(0, 0, 0);
-        pdf.text('Student Name: ', 20, 125);
-        pdf.text('Student ID: ', 20, 135);
-        pdf.text('Blockchain Address: ', 20, 145);
-        pdf.text('(Address must match certificate records)', 25, 152);
+
+        pdf.text('Student Name: ', 20, 100);
+        pdf.setDrawColor(0, 0, 0);   // Line color (black)
+        pdf.setLineWidth(0.3);       // Thickness in mm (try 0.5, 1, 2 etc.)
+        pdf.line(50, 100, 180, 100);
+
+        pdf.text('Student ID: ', 20, 110);
+        pdf.setDrawColor(0, 0, 0);   // Line color (black)
+        pdf.setLineWidth(0.3);       // Thickness in mm (try 0.5, 1, 2 etc.)
+        pdf.line(43, 110, 180, 110);
+
+        pdf.text('Blockchain Address: ', 20, 120);
+        pdf.setDrawColor(0, 0, 0);   // Line color (black)
+        pdf.setLineWidth(0.3);       // Thickness in mm (try 0.5, 1, 2 etc.)
+        pdf.line(60, 120, 180, 120);
+
+        pdf.text('(Address must match certificate records)', 25, 126);
 
         // Institution details
         pdf.setFontSize(16);
         pdf.setTextColor(102, 126, 234);
-        pdf.text('Institution Information:', 20, 170);
+        pdf.text('Institution Information:', 20, 140);
 
         pdf.setFontSize(12);
         pdf.setTextColor(0, 0, 0);
-        pdf.text('Institution Name: ', 20, 185);
-        pdf.text('Authorization Date: ', 20, 195);
-        pdf.text('Authorization ID: ', 20, 205);
+        // pdf.text('Institution Name: ', 20, 150);
+
+        pdf.text('Institution Name: ', 20, 150);
+        pdf.setDrawColor(0, 0, 0);   // Line color (black)
+        pdf.setLineWidth(0.3);       // Thickness in mm (try 0.5, 1, 2 etc.)
+        pdf.line(53, 150, 180, 150);
+
+        pdf.text('Authorization Date: ', 20, 160);
+        pdf.setDrawColor(0, 0, 0);   // Line color (black)
+        pdf.setLineWidth(0.3);       // Thickness in mm (try 0.5, 1, 2 etc.)
+        pdf.line(57, 160, 180, 160);
+
+        pdf.text('Authorization ID: ', 20, 170);
+        pdf.setDrawColor(0, 0, 0);   // Line color (black)
+        pdf.setLineWidth(0.3);       // Thickness in mm (try 0.5, 1, 2 etc.)
+        pdf.line(53, 170, 180, 170);
+
+        // // Example: Empty box with text under it
+        // pdf.setDrawColor(0,0,0);   // Border color
+        // pdf.setLineWidth(0.5);       // Border thickness
+        // pdf.rect(50, 185, 110, 15);   // x, y, width, height (box position)
+
+        pdf.setDrawColor(0, 0, 0);   // Line color (black)
+        pdf.setLineWidth(0.3);       // Thickness in mm (try 0.5, 1, 2 etc.)
+        pdf.line(35, 195, 180, 195); // Horizontal line for signature
+
+        // Text under the box
+        pdf.setFontSize(12);
+        pdf.setTextColor(0, 0, 0);
+        pdf.text('Status Of Authorization', 105, 205, { align: 'center' });
+
 
         // Signature section
-        pdf.setFontSize(14);
+        pdf.setFontSize(12);
         pdf.setTextColor(0, 128, 0); // Green color
-        pdf.text('AUTHORIZED SIGNATURE', 105, 230, { align: 'center' });
-        pdf.text('DIGITAL SIGNATURE VERIFIED', 105, 240, { align: 'center' });
-        pdf.text('Institution Seal Applied', 105, 250, { align: 'center' });
+        pdf.text('AUTHORIZED SIGNATURE', 105, 222, { align: 'center' });
+        pdf.text('DIGITAL SIGNATURE VERIFIED', 105, 232, { align: 'center' });
+        pdf.text('Institution Seal Applied', 105, 242, { align: 'center' });
 
         // Instructions
         pdf.setFontSize(10);
         pdf.setTextColor(128, 128, 128);
-        pdf.text('Instructions:', 20, 270);
-        pdf.text('1. Fill in your personal information above', 20, 277);
-        pdf.text('2. Have your institution authorize this document', 20, 284);
-        pdf.text('3. Upload this PDF to access your certificates', 20, 291);
+        pdf.text('Instructions:', 20, 260);
+        pdf.text('1. Fill in your personal information above', 20, 265);
+        pdf.text('2. Have your institution authorize this document', 20, 270);
+        pdf.text('3. Upload this PDF to access your certificates', 20, 275);
 
         pdf.save('Authorization-Form-Template.pdf');
     };
