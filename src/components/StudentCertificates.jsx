@@ -285,6 +285,20 @@ function StudentCertificates() {
         return;
       }
 
+      const formatTimestamp = (value, rawValue) => {
+        if (rawValue) {
+          return new Date(Number(rawValue) * 1000).toLocaleString();
+        }
+        if (value) {
+          const parsed = Date.parse(value);
+          return !Number.isNaN(parsed) ? new Date(parsed).toLocaleString() : value;
+        }
+        return 'N/A';
+      };
+
+      const issueDateText = formatTimestamp(certData.issueDate, certData.issueDate_raw);
+      const expiryDateText = formatTimestamp(certData.expiryDate, certData.expiryDate_raw);
+
       // Generate and download PDF certificate
       const { jsPDF } = await import('jspdf');
       const pdf = new jsPDF({
@@ -335,8 +349,8 @@ function StudentCertificates() {
       pdf.setTextColor(0, 0, 0);
       pdf.text(`Certificate ID: ${certificateId}`, 148.5, 132, { align: 'center' });
       pdf.text(`Institution: ${certData.institutionName || 'Institution'}`, 148.5, 142, { align: 'center' });
-      pdf.text(`Issue Date: ${certData.issueDate || 'N/A'}`, 148.5, 152, { align: 'center' });
-      pdf.text(`Expiry Date: ${certData.expiryDate || 'N/A'}`, 148.5, 162, { align: 'center' });
+      pdf.text(`Issue Date: ${issueDateText}`, 148.5, 152, { align: 'center' });
+      pdf.text(`Expiry Date: ${expiryDateText}`, 148.5, 162, { align: 'center' });
 
       // Add authorization signature in green
       pdf.setTextColor(0, 128, 0); // Green color
@@ -363,7 +377,7 @@ function StudentCertificates() {
         <h3>🔐 Certificate Access Authorization</h3>
         <p className="auth-description">
           To access your certificates, you must upload an authorization PDF provided by your institution.
-          The PDF must include the exact phrase "authorised!! Eligible to get certificate" and student details.
+          The PDF must include the exact phrase "Authorised!! Eligible to get certificate" and student details.
         </p>
 
         <div className="upload-section">

@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import CertificateVerificationABI from '../artifacts/contracts/CertificateVerification.sol/CertificateVerification.json';
+import CertificateVerificationABI from '../abis/CertificateVerification.json';
 
 // Get contract address from environment variable
 const CONTRACT_ADDRESS = import.meta.env.VITE_CONTRACT_ADDRESS;
@@ -159,11 +159,16 @@ export const getProviderWithoutENS = () => {
 
 export const getContract = async (withSigner = false) => {
     try {
+        if (!CONTRACT_ADDRESS || CONTRACT_ADDRESS.trim() === '') {
+            throw new Error('VITE_CONTRACT_ADDRESS is not defined in environment variables');
+        }
+
         const provider = getProviderWithoutENS();
+        const contractAbi = CertificateVerificationABI.abi || CertificateVerificationABI;
 
         const contract = new ethers.Contract(
             CONTRACT_ADDRESS,
-            CertificateVerificationABI.abi,
+            contractAbi,
             provider
         );
 

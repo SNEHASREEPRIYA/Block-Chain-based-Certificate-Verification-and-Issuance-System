@@ -290,7 +290,7 @@ function CertificateIssuance() {
         institutionAddress: registeredInstitution.address,  // Use registered institution address
         institutionName: registeredInstitution.name,  // Use registered institution name
         institutionCategory: formData.institutionCategory,
-        issueDate: new Date().toLocaleDateString(),
+        issueDate: new Date().toLocaleString(),
         issueDate_raw: Math.floor(Date.now() / 1000),
         issuer: accounts[0],
         transactionHash: issuanceResult.hash,
