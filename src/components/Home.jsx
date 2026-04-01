@@ -130,7 +130,7 @@ function Home() {
       <div className="welcome-section">
         <div className="hero-content">
           <img src="/certificate-check.png" alt="Certificate" className="hero-icon" />
-          <h1>🎓 Blockchain Certificate Verification System</h1>
+          <h1>🎓 Blockchain based Certificate Issuance and Verification System</h1>
           <p>Secure, Verifiable, and Immutable Digital Certificates on the Blockchain</p>
           <button className="refresh-btn" onClick={fetchRegisteredInstitutions}>
             🔄 Refresh Institutions

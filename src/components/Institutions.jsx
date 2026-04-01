@@ -45,7 +45,7 @@ function RetrieveInstitution() {
           <h3>Institution Details</h3>
           <p><strong>Name:</strong> {retrievedInstitution.name}</p>
           <p><strong>Email:</strong> {retrievedInstitution.email}</p>
-          <p><strong>Accreditation ID:</strong> {retrievedInstitution.accreditationId}</p>
+          {/* <p><strong>Accreditation ID:</strong> {retrievedInstitution.accreditationId}</p> */}
           <p><strong>Country:</strong> {retrievedInstitution.country}</p>
         </div>
       )}
