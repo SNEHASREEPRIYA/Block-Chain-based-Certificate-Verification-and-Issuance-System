@@ -23,3 +23,8 @@ http://localhost:3000
 Network: Localhost 31337
 
 Import any of the 20 accounts from the Hardhat node output (from Terminal 1).
+
+
+## Live Demo
+You can view the deployed project here: [Project on Vercel](https://block-chain-based-certificate-verif-alpha.vercel.app/)
+
